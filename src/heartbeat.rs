@@ -1,53 +1,40 @@
-extern crate rand;
-
-use rand::Rng;
 use std::{error, thread, time};
-
-const FREQUENCY: u64 = 500;
+use std::sync::{Arc, Mutex};
 
 type BoxedErrorResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 pub type HeartBeatResult = BoxedErrorResult<()>;
 
-pub struct HeartBeatInfo {
-    pub portnum: u16,
-    pub frequency: time::Duration,
-    pub send_count: u32,
+const FREQUENCY_DURATION: u64 = 500;
+const PORTNUM: u16 = 9000;
+
+lazy_static! {
+    pub static ref count: Mutex<i32> = Mutex::new(0);
+    pub static ref FREQUENCY: time::Duration = time::Duration::from_millis(FREQUENCY_DURATION);
 }
 
-impl HeartBeatInfo {
-    fn new() -> HeartBeatInfo {
-        let mut rng = rand::thread_rng();
-        HeartBeatInfo {
-            portnum: rng.gen(),
-            frequency: time::Duration::from_millis(FREQUENCY),
-            send_count: 0
-        }
-    }
-}
-
-pub fn spawn_heartbeater_component(f: &mut dyn FnMut(&mut HeartBeatInfo) -> HeartBeatResult) {
-    let mut hbinfo = HeartBeatInfo::new();
+pub fn run_component(f: &mut dyn Fn() -> HeartBeatResult) {
     loop {
-        let fres = f(&mut hbinfo);
+        let fres = f();
         if let Err(e) = fres  {
             println!("Error: {}", e);
         }
-        thread::sleep(hbinfo.frequency);
+        thread::sleep(*FREQUENCY);
     };
 }
 
-pub fn sender(hbinfo: &mut HeartBeatInfo) -> HeartBeatResult {
-    let oldval = hbinfo.send_count;
+pub fn sender() -> HeartBeatResult {
+    let mut locked_count = count.lock().unwrap();
+    let oldval: i32 = *locked_count;
     let newval = oldval + 1;
-    hbinfo.send_count = newval;
+    *locked_count = newval;
     println!("Updating sendval from {} to {}", oldval, newval);
     Ok(())
 }
 
-pub fn receiver(hbinfo: &mut HeartBeatInfo) -> HeartBeatResult {
-    let oldval = hbinfo.send_count;
-    let newval = oldval + 1;
-    hbinfo.send_count = newval;
-    println!("Updating sendval from {} to {}", oldval, newval);
+pub fn receiver() -> HeartBeatResult {
+    let val = *count.lock().unwrap();
+    if val % 10 == 0 {
+        println!("val = {}", val);
+    }
     Ok(())
 }
