@@ -3,6 +3,7 @@ extern crate lazy_static;
 mod component_manager;
 mod constants;
 mod heartbeat;
+mod locks;
 mod packet;
 use std::{env, error, thread, time};
 use std::process::exit;

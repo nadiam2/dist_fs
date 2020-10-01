@@ -20,7 +20,7 @@ pub fn join(sender: &PacketSender) -> HeartBeatResult {
     component_manager::IS_JOINED_LOCK.write(true);
     let queue_item = PacketQueueItem {
         dests: constants::IP_LIST.iter().cloned().collect(),
-        packet: Packet::Join(Box::new(JoinPacket {}))
+        packet: Box::new(JoinPacket {})
     };
     sender.send(queue_item)?;
     println!("sent join packet!");

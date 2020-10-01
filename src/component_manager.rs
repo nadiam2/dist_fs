@@ -1,10 +1,10 @@
 use crate::BoxedErrorResult;
 use crate::heartbeat;
+use crate::locks::*;
 use crate::packet::*;
 use std::convert::TryFrom;
 use std::net::UdpSocket;
-use std::ops::Deref;
-use std::sync::{Arc, mpsc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
+use std::sync::{Arc, mpsc};
 use std::{io, thread, time};
 
 // Types
@@ -77,7 +77,7 @@ pub fn receiver(sender: &PacketSender) -> ComponentResult {
     let udp_socket = UDP_SOCKET_LOCK.read();
     loop {
         if is_joined() {
-            let (packet_op, source) = Packet::read(&*udp_socket)?;
+            let (packet_op, source) = read_packet(&*udp_socket)?;
             packet_op.execute(source, &sender);
         } else {
             // Drop the packet
@@ -96,65 +96,6 @@ pub fn console(sender: &PacketSender) -> ComponentResult {
         _       => println!("Invalid command. (Maybe replace with a help func)")
     }
     Ok(())
-}
-
-// Lock Shenanigans
-pub struct RwLockOption<T> {
-    lock: RwLock<Option<T>>
-}
-
-impl<T> RwLockOption<T> {
-    pub fn new() -> Self {
-        RwLockOption{lock: RwLock::new(None)}
-    }
-    pub fn read<'a>(&'a self) -> InnerRwLock<'a, T> {
-        let guard = self.lock.read().unwrap();
-        InnerRwLock{guard}
-    }
-    pub fn write(&self, val: T) {
-        let mut opt = self.lock.write().unwrap();
-        *opt = Some(val);
-    }
-}
-
-pub struct InnerRwLock<'a, T> {
-    guard: RwLockReadGuard<'a, Option<T>>
-}
-
-impl<'a, T> Deref for InnerRwLock<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self.guard.as_ref().unwrap()
-    }
-}
-
-pub struct MutexOption<T> {
-    lock: Mutex<Option<T>>
-}
-
-impl<T> MutexOption<T> {
-    pub fn new() -> Self {
-        MutexOption{lock: Mutex::new(None)}
-    }
-    pub fn read<'a>(&'a self) -> InnerMutex<'a, T> {
-        let guard = self.lock.lock().unwrap();
-        InnerMutex{guard}
-    }
-    pub fn write(&self, val: T) {
-        let mut opt = self.lock.lock().unwrap();
-        *opt = Some(val);
-    }
-}
-
-pub struct InnerMutex<'a, T> {
-    guard: MutexGuard<'a, Option<T>>
-}
-
-impl<'a, T> Deref for InnerMutex<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self.guard.as_ref().unwrap()
-    }
 }
 
 // Helper Functions
