@@ -37,7 +37,7 @@ impl PacketQueueItem {
 // Traits
 pub trait PacketWriteExecute {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>>;
-    fn execute(&self, source: String, sender: &PacketSender) -> BoxedErrorResult<()>; // TODO: Change the () to a useful type for forwarding requests and such
+    fn execute(&self, source: String, sender: &PacketSender) -> BoxedErrorResult<()>;
 }
 
 // Packet Structs

@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Lock Shenanigans
 pub struct RwLockOption<T> {
@@ -17,6 +17,9 @@ impl<T> RwLockOption<T> {
     pub fn write(&self, val: T) {
         let mut opt = self.lock.write().unwrap();
         *opt = Some(val);
+    }
+    pub fn get_mut(&self) -> RwLockWriteGuard<Option<T>> {
+        self.lock.write().unwrap()
     }
 }
 

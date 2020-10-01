@@ -2,6 +2,7 @@
 extern crate lazy_static;
 mod component_manager;
 mod constants;
+mod globals;
 mod heartbeat;
 mod locks;
 mod packet;

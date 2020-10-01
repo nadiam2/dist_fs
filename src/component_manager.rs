@@ -1,4 +1,5 @@
 use crate::BoxedErrorResult;
+use crate::globals;
 use crate::heartbeat;
 use crate::locks::*;
 use crate::packet::*;
@@ -12,12 +13,6 @@ type FrequencyInterval = Option<u64>;
 type ComponentResult = BoxedErrorResult<()>;
 pub type PacketSender = mpsc::Sender<PacketQueueItem>;
 pub type PacketReceiver = mpsc::Receiver<PacketQueueItem>;
-
-// Vars
-lazy_static! {
-    pub static ref UDP_SOCKET_LOCK: RwLockOption<UdpSocket> = RwLockOption::new();
-    pub static ref IS_JOINED_LOCK: RwLockOption<bool> = RwLockOption::new();
-}
 
 // Component Starters
 pub fn start_sender(freq_interval: FrequencyInterval, receiver: PacketReceiver) {
@@ -41,8 +36,10 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: PacketSender) {
 
 // Utility Functions
 pub fn startup(port: u16) -> BoxedErrorResult<()> {
-    UDP_SOCKET_LOCK.write(UdpSocket::bind(format!("localhost:{}", port))?);
-    IS_JOINED_LOCK.write(false);
+    globals::UDP_SOCKET.write(UdpSocket::bind(format!("localhost:{}", port))?);
+    globals::IS_JOINED.write(false);
+    globals::MEMBERSHIP_LIST.write(Vec::new());
+    globals::MY_IP_ADDR.write(format!("localhost:{}", port).to_string()); //  TODO: This must change for external hosts to work
     Ok(())
 }
 
@@ -66,15 +63,19 @@ fn run_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A) {
 pub fn sender(receiver: &PacketReceiver) -> ComponentResult {
     if !is_joined() { return Ok(()) }
 
-    let udp_socket = UDP_SOCKET_LOCK.read();
-    loop {
-        let queue_item = receiver.recv()?;
+    let udp_socket = globals::UDP_SOCKET.read();
+    // Send heartbeat packets
+    
+    
+    // Empty the queue by sending all remaining packets
+    while let Ok(queue_item) = receiver.try_recv() {
         queue_item.write_all(&udp_socket);
     }
+    Ok(())
 }
 
 pub fn receiver(sender: &PacketSender) -> ComponentResult {
-    let udp_socket = UDP_SOCKET_LOCK.read();
+    let udp_socket = globals::UDP_SOCKET.read();
     loop {
         if is_joined() {
             let (packet_op, source) = read_packet(&*udp_socket)?;
@@ -100,7 +101,7 @@ pub fn console(sender: &PacketSender) -> ComponentResult {
 
 // Helper Functions
 pub fn is_joined() -> bool {
-    *IS_JOINED_LOCK.read()
+    *globals::IS_JOINED.read()
 }
 
 fn parse_frequency(freq_interval: FrequencyInterval) -> u64 {
