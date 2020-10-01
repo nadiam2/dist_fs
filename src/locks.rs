@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Lock Shenanigans
@@ -10,27 +10,45 @@ impl<T> RwLockOption<T> {
     pub fn new() -> Self {
         RwLockOption{lock: RwLock::new(None)}
     }
-    pub fn read<'a>(&'a self) -> InnerRwLock<'a, T> {
+    pub fn read<'a>(&'a self) -> InnerRwReadLock<'a, T> {
         let guard = self.lock.read().unwrap();
-        InnerRwLock{guard}
+        InnerRwReadLock{guard}
     }
     pub fn write(&self, val: T) {
         let mut opt = self.lock.write().unwrap();
         *opt = Some(val);
     }
-    pub fn get_mut(&self) -> RwLockWriteGuard<Option<T>> {
-        self.lock.write().unwrap()
+    pub fn get_mut<'a>(&'a self) -> InnerRwWriteLock<'a, T> {
+        let guard = self.lock.write().unwrap();
+        InnerRwWriteLock{guard}
     }
 }
 
-pub struct InnerRwLock<'a, T> {
+pub struct InnerRwReadLock<'a, T> {
     guard: RwLockReadGuard<'a, Option<T>>
 }
 
-impl<'a, T> Deref for InnerRwLock<'a, T> {
+pub struct InnerRwWriteLock<'a, T> {
+    guard: RwLockWriteGuard<'a, Option<T>>
+}
+
+impl<'a, T> Deref for InnerRwReadLock<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.guard.as_ref().unwrap()
+    }
+}
+
+impl<'a, T> Deref for InnerRwWriteLock<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.guard.as_ref().unwrap()
+    }
+}
+
+impl<'a, T> DerefMut for InnerRwWriteLock<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard.as_mut().unwrap()
     }
 }
 

@@ -69,6 +69,8 @@ pub fn sender(receiver: &PacketReceiver) -> ComponentResult {
     
     // Empty the queue by sending all remaining packets
     while let Ok(queue_item) = receiver.try_recv() {
+        println!("going to send to {:?}", queue_item.dests
+        );
         queue_item.write_all(&udp_socket);
     }
     Ok(())
