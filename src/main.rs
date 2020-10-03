@@ -5,7 +5,7 @@ mod constants;
 mod globals;
 mod heartbeat;
 mod locks;
-mod packet;
+mod operation;
 use std::{env, error, thread, time};
 use std::process::exit;
 use std::sync::{mpsc};
@@ -17,11 +17,11 @@ type ArgResult = (u16);
 // Functions
 fn main() -> BoxedErrorResult<()> {
     let port = parse_args_or_crash();
-    let (packet_sender, packet_receiver) = mpsc::channel();
+    let (operation_sender, operation_receiver) = mpsc::channel();
     component_manager::startup(port)?;
-    component_manager::start_sender(Some(1000), packet_receiver);
-    component_manager::start_receiver(Some(1000), packet_sender.clone());
-    component_manager::start_console(None, packet_sender.clone());
+    component_manager::start_sender(Some(1000), operation_receiver);
+    component_manager::start_receiver(Some(1000), operation_sender.clone());
+    component_manager::start_console(None, operation_sender.clone());
     loop {
         thread::sleep(time::Duration::from_millis(1000));
     }
