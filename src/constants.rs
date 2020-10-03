@@ -12,9 +12,17 @@
 // ];
 
 pub const IP_LIST: [&str; 4] = [
-    "localhost:9000",
-    "localhost:9001",
-    "localhost:9002",
-    "localhost:9003",
+    "192.168.0.124:9000",
+    "192.168.0.124:9001",
+    "192.168.0.124:9002",
+    "192.168.0.174:9000",
     // when youre not lazy, get a setup of the machines working
 ];
+
+// pub const IP_LIST: [&str; 4] = [
+//     "localhost:9000",
+//     "localhost:9001",
+//     "localhost:9002",
+//     "localhost:9003",
+//     // when youre not lazy, get a setup of the machines working
+// ];

@@ -4,7 +4,8 @@ use crate::heartbeat;
 use crate::locks::*;
 use crate::packet::*;
 use std::convert::TryFrom;
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, UdpSocket};
+use std::str::FromStr;
 use std::sync::{Arc, mpsc};
 use std::{io, thread, time};
 
@@ -36,10 +37,12 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: PacketSender) {
 
 // Utility Functions
 pub fn startup(port: u16) -> BoxedErrorResult<()> {
-    globals::UDP_SOCKET.write(UdpSocket::bind(format!("localhost:{}", port))?);
+    // globals::UDP_SOCKET.write(UdpSocket::bind(format!("localhost:{}", port))?);
+    let udp_socket_addr = get_udp_scket_addr(port)?;
+    globals::UDP_SOCKET.write(UdpSocket::bind(&udp_socket_addr)?);
     globals::IS_JOINED.write(false);
     globals::MEMBERSHIP_LIST.write(Vec::new());
-    globals::MY_IP_ADDR.write(format!("localhost:{}", port).to_string()); //  TODO: This must change for external hosts to work
+    globals::MY_IP_ADDR.write(udp_socket_addr.to_string()); //  TODO: This must change for external hosts to work
     Ok(())
 }
 
@@ -111,4 +114,21 @@ fn parse_frequency(freq_interval: FrequencyInterval) -> u64 {
         Some(interval) => interval,
         None           => 0
     }
+}
+
+// TODO: Eventually, change this to external IPs
+fn get_udp_scket_addr(port: u16) -> BoxedErrorResult<String> {
+    let local_addr = get_local_addr()?;
+    Ok(format!("{}:{}", local_addr, port))
+}
+
+fn get_local_addr() -> BoxedErrorResult<String> {
+    for iface in get_if_addrs::get_if_addrs().unwrap() {
+        if let get_if_addrs::IfAddr::V4(v4_addr) = iface.addr {
+            if v4_addr.netmask == Ipv4Addr::from_str("255.255.255.0").unwrap() {
+                return Ok(v4_addr.ip.to_string());
+            }
+        }
+    }
+    Err("Could not find valid local IPv4 address".to_string().into())
 }
