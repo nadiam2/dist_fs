@@ -1,10 +1,11 @@
 use bincode;
 use crate::BoxedErrorResult;
-use crate::component_manager::OperationSender;
+use crate::component_manager::{log, OperationSender};
 use crate::globals;
 use crate::heartbeat::{ips_from_ids, JoinOperation, NewMemberOperation, MembershipListOperation};
 use serde::{Serialize};
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::net::UdpSocket;
 
 
@@ -33,6 +34,7 @@ impl OperationQueueItem {
         for dest in &self.dests {
             socket.send_to(&serialized, &dest)?;
         }
+        log(format!("Sending a {} to {:?}", self.operation.to_string(), self.dests));
         Ok(())
     }
     pub fn for_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
@@ -53,6 +55,7 @@ impl OperationQueueItem {
 pub trait OperationWriteExecute {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>>;
     fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()>;
+    fn to_string(&self) -> String;
 }
 
 // Functions
@@ -72,6 +75,8 @@ pub fn read_operation(socket: &UdpSocket) -> BoxedErrorResult<(BoxedOperation, S
         'M' => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
         _   => return Err(String::from("Read unrecognized operation header").into())
     };
+    
+    log(format!("Read a {} from {:?}", operation.to_string(), &sender));
     return Ok((operation, sender.to_string()));
 }
 

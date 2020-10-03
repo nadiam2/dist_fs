@@ -2,10 +2,12 @@ use crate::BoxedErrorResult;
 use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::net::{Ipv4Addr, UdpSocket};
 use std::str::FromStr;
 use std::sync::{mpsc};
-use std::{io, thread, time};
+use std::{thread, time};
 
 // Types
 type FrequencyInterval = Option<u64>;
@@ -35,12 +37,25 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: OperationSender) 
 
 // Utility Functions
 pub fn startup(port: u16) -> BoxedErrorResult<()> {
-    globals::DEBUG.write(true); // TODO: Add this as a command line argument
+    startup_log_file(port);
     let udp_socket_addr = get_udp_scket_addr(port)?;
     globals::UDP_SOCKET.write(UdpSocket::bind(&udp_socket_addr)?);
     globals::IS_JOINED.write(false);
     globals::MEMBERSHIP_LIST.write(Vec::new());
     globals::MY_IP_ADDR.write(udp_socket_addr.to_string());
+    globals::DEBUG.write(true);
+    Ok(())
+}
+
+fn startup_log_file(port: u16) -> BoxedErrorResult<()> {
+    if let Err(_) = fs::create_dir("logs") {}
+    let timestamp = heartbeat::get_timestamp()?;
+    let debug_file = format!("logs/port_{}_{:020}.txt", port, timestamp);
+    globals::LOG_FILE.write(OpenOptions::new()
+                              .read(true)
+                              .write(true)
+                              .create(true)
+                              .open(debug_file)?);
     Ok(())
 }
 
@@ -73,7 +88,6 @@ pub fn sender(receiver: &OperationReceiver) -> ComponentResult {
     
     // Empty the queue by sending all remaining packets
     while let Ok(queue_item) = receiver.try_recv() {
-        println!("going to send to {:?}", queue_item.dests);
         queue_item.write_all(&udp_socket)?;
     }
     Ok(())
@@ -131,4 +145,10 @@ fn get_local_addr() -> BoxedErrorResult<String> {
         }
     }
     Err("Could not find valid local IPv4 address".to_string().into())
+}
+
+// TODO: Maybe find another place for this - Also: borrow or owned?
+pub fn log(msg: String) -> BoxedErrorResult<()> {
+    writeln!(*globals::LOG_FILE.get_mut(), "{}", msg)?;
+    Ok(())
 }

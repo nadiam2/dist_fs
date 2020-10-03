@@ -1,6 +1,5 @@
 use std::ops::{Deref, DerefMut};
-// use std::sync::{Mutex, MutexGuard};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Lock Shenanigans
 pub struct RwLockOption<T> {
@@ -53,31 +52,37 @@ impl<'a, T> DerefMut for InnerRwWriteLock<'a, T> {
     }
 }
 
-// pub struct MutexOption<T> {
-//     lock: Mutex<Option<T>>
-// }
+pub struct MutexOption<T> {
+    lock: Mutex<Option<T>>
+}
 
-// impl<T> MutexOption<T> {
-//     pub fn new() -> Self {
-//         MutexOption{lock: Mutex::new(None)}
-//     }
-//     pub fn read<'a>(&'a self) -> InnerMutex<'a, T> {
-//         let guard = self.lock.lock().unwrap();
-//         InnerMutex{guard}
-//     }
-//     pub fn write(&self, val: T) {
-//         let mut opt = self.lock.lock().unwrap();
-//         *opt = Some(val);
-//     }
-// }
+impl<T> MutexOption<T> {
+    pub fn new() -> Self {
+        MutexOption{lock: Mutex::new(None)}
+    }
+    pub fn read<'a>(&'a self) -> InnerMutex<'a, T> {
+        let guard = self.lock.lock().unwrap();
+        InnerMutex{guard}
+    }
+    pub fn write(&self, val: T) {
+        let mut opt = self.lock.lock().unwrap();
+        *opt = Some(val);
+    }
+}
 
-// pub struct InnerMutex<'a, T> {
-//     guard: MutexGuard<'a, Option<T>>
-// }
+pub struct InnerMutex<'a, T> {
+    guard: MutexGuard<'a, Option<T>>
+}
 
-// impl<'a, T> Deref for InnerMutex<'a, T> {
-//     type Target = T;
-//     fn deref(&self) -> &Self::Target {
-//         self.guard.as_ref().unwrap()
-//     }
-// }
+impl<'a, T> Deref for InnerMutex<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.guard.as_ref().unwrap()
+    }
+}
+
+impl<'a, T> DerefMut for InnerMutex<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard.as_mut().unwrap()
+    }
+}

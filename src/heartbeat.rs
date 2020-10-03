@@ -14,7 +14,7 @@ pub fn join(sender: &OperationSender) -> HeartBeatResult {
 
     // Mark self as joined and in membership list
     globals::IS_JOINED.write(true);
-    let my_id = gen_id();
+    let my_id = gen_id()?;
     globals::MY_ID.write(my_id.clone());
     (*globals::MEMBERSHIP_LIST.get_mut()).push(my_id.clone());
 
@@ -24,7 +24,6 @@ pub fn join(sender: &OperationSender) -> HeartBeatResult {
         operation: Box::new(JoinOperation {id: my_id})
     };
     sender.send(queue_item)?;
-    println!("sent join packet!");
     Ok(())
 }
 
@@ -71,12 +70,12 @@ pub fn merge_membership_list(membership_list: &Vec<String>) -> HeartBeatResult {
     Ok(())
 }
 
-fn gen_id() -> String {
-    return format!("{}|{}", *globals::MY_IP_ADDR.read(), get_timestamp()).to_string();
+fn gen_id() -> BoxedErrorResult<String> {
+    Ok(format!("{}|{}", *globals::MY_IP_ADDR.read(), get_timestamp()?).to_string())
 }
 
-fn get_timestamp() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()
+pub fn get_timestamp() -> BoxedErrorResult<u64> {
+    Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs())
 }
 
 // Operations
@@ -111,6 +110,7 @@ impl OperationWriteExecute for JoinOperation {
         })))?;
         Ok(())
     }
+    fn to_string(&self) -> String { format!("{:?}", self) }
 }
 
 impl OperationWriteExecute for NewMemberOperation {
@@ -122,6 +122,7 @@ impl OperationWriteExecute for NewMemberOperation {
         // MAYBE TODO: Do we need more redundancy to make sure joins are not missed?
         Ok(())
     }
+    fn to_string(&self) -> String { format!("{:?}", self) }
 }
 
 impl OperationWriteExecute for MembershipListOperation {
@@ -132,4 +133,5 @@ impl OperationWriteExecute for MembershipListOperation {
         merge_membership_list(&self.membership_list)?;
         Ok(())
     }
+    fn to_string(&self) -> String { format!("{:?}", self) }
 }
