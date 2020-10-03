@@ -3,6 +3,7 @@ use std::net::UdpSocket;
 
 // Vars
 lazy_static! {
+    pub static ref DEBUG: RwLockOption<bool> = RwLockOption::new();
     pub static ref UDP_SOCKET: RwLockOption<UdpSocket> = RwLockOption::new();
     pub static ref IS_JOINED: RwLockOption<bool> = RwLockOption::new();
     pub static ref MEMBERSHIP_LIST: RwLockOption<Vec<String>> = RwLockOption::new();

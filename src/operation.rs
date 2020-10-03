@@ -3,11 +3,9 @@ use crate::BoxedErrorResult;
 use crate::component_manager::OperationSender;
 use crate::globals;
 use crate::heartbeat::{ips_from_ids, JoinOperation, NewMemberOperation, MembershipListOperation};
-use serde::{Serialize, Deserialize};
+use serde::{Serialize};
 use std::convert::TryInto;
-use std::error;
 use std::net::UdpSocket;
-use std::fmt;
 
 
 // OPCODES

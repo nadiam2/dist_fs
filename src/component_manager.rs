@@ -1,12 +1,10 @@
 use crate::BoxedErrorResult;
 use crate::globals;
 use crate::heartbeat;
-use crate::locks::*;
 use crate::operation::*;
-use std::convert::TryFrom;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::str::FromStr;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc};
 use std::{io, thread, time};
 
 // Types
@@ -37,6 +35,7 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: OperationSender) 
 
 // Utility Functions
 pub fn startup(port: u16) -> BoxedErrorResult<()> {
+    globals::DEBUG.write(true); // TODO: Add this as a command line argument
     let udp_socket_addr = get_udp_scket_addr(port)?;
     globals::UDP_SOCKET.write(UdpSocket::bind(&udp_socket_addr)?);
     globals::IS_JOINED.write(false);
@@ -55,9 +54,12 @@ fn start_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: A, freq
 
 fn run_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A) {
     let fres = f(arg);
-    if let Err(e) = fres  {
-        // TODO: Add some better error handling
-        println!("Error: {}", e);
+    // Separate ifs because the if let still experimental with another expression
+    if *globals::DEBUG.read() {
+        if let Err(e) = fres {
+            // TODO: Add some better error handling
+            println!("Error: {}", e);
+        }
     }
 }
 
@@ -71,9 +73,8 @@ pub fn sender(receiver: &OperationReceiver) -> ComponentResult {
     
     // Empty the queue by sending all remaining packets
     while let Ok(queue_item) = receiver.try_recv() {
-        println!("going to send to {:?}", queue_item.dests
-        );
-        queue_item.write_all(&udp_socket);
+        println!("going to send to {:?}", queue_item.dests);
+        queue_item.write_all(&udp_socket)?;
     }
     Ok(())
 }
@@ -83,10 +84,10 @@ pub fn receiver(sender: &OperationSender) -> ComponentResult {
     loop {
         if is_joined() {
             let (operation, source) = read_operation(&*udp_socket)?;
-            operation.execute(source, &sender);
+            operation.execute(source, &sender)?;
         } else {
             // Drop the packet
-            udp_socket.recv_from(&mut vec![0]);
+            udp_socket.recv_from(&mut vec![0])?;
         }
     }
 }

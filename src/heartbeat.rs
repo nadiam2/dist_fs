@@ -1,20 +1,12 @@
 use crate::BoxedErrorResult;
-use crate::component_manager;
 use crate::component_manager::*;
 use crate::constants;
 use crate::globals;
 use crate::operation::*;
 use serde::{Serialize, Deserialize};
-use std::{error, io, thread, time};
-use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 type HeartBeatResult = BoxedErrorResult<()>;
-
-lazy_static! {
-    pub static ref Count: Mutex<u64> = Mutex::new(0);
-}
 
 pub fn join(sender: &OperationSender) -> HeartBeatResult {
     // Add self to membership list and push the J operation onto the queue
@@ -36,7 +28,7 @@ pub fn join(sender: &OperationSender) -> HeartBeatResult {
     Ok(())
 }
 
-pub fn leave(sender: &OperationSender) -> HeartBeatResult {
+pub fn leave(_sender: &OperationSender) -> HeartBeatResult {
     // 
     println!("left!");
     Ok(())
@@ -108,7 +100,7 @@ impl OperationWriteExecute for JoinOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['J' as u8]))
     }
-    fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, _source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
         // Add the new guy and send it to everyone
         insert_node(&self.id)?;
         sender.send(OperationQueueItem::for_everyone(Box::new(NewMemberOperation{
@@ -125,8 +117,8 @@ impl OperationWriteExecute for NewMemberOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['N' as u8]))
     }
-    fn execute(&self, source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
-        insert_node(&self.id);
+    fn execute(&self, _source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+        insert_node(&self.id)?;
         // MAYBE TODO: Do we need more redundancy to make sure joins are not missed?
         Ok(())
     }
@@ -136,8 +128,8 @@ impl OperationWriteExecute for MembershipListOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['M' as u8]))
     }
-    fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
-        merge_membership_list(&self.membership_list);
+    fn execute(&self, _source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+        merge_membership_list(&self.membership_list)?;
         Ok(())
     }
 }
