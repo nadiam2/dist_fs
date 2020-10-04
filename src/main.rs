@@ -5,6 +5,7 @@ mod constants;
 mod globals;
 mod heartbeat;
 mod locks;
+mod modular;
 mod operation;
 use std::{env, error, thread, time};
 use std::process::exit;
@@ -51,4 +52,20 @@ fn try_parse_args() -> BoxedErrorResult<ArgResult> {
 
 fn help() {
     println!("Usage: ./BIN PORT_NUM");
+}
+
+#[cfg(test)]
+mod tests {
+use crate::modular::*;
+    #[test]
+    fn modular_tests() {
+        let m1 = Modular::new(1, 7);
+        assert_eq!(*m1, 1);
+        let m2 = Modular::new(-1, 7);
+        assert_eq!(*m2, 6);
+        let m3 = Modular::new(1, 7);
+        assert_eq!(*(m3 - 2), 6);
+        let m4 = Modular::new(6, 7);
+        assert_eq!(*(m4 + 2), 1);
+    }
 }

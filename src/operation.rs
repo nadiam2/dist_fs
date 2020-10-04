@@ -1,8 +1,9 @@
 use bincode;
 use crate::BoxedErrorResult;
 use crate::component_manager::{log, OperationSender};
+use crate::constants::HEADER_SIZE;
 use crate::globals;
-use crate::heartbeat::{ips_from_ids, JoinOperation, NewMemberOperation, MembershipListOperation};
+use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, NewMemberOperation, MembershipListOperation};
 use serde::{Serialize};
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -16,19 +17,16 @@ use std::net::UdpSocket;
 //      and have listener update their list (usually will be initializing it)
 // 'N': New Node -> data should contain id of new node
 
-// Constants
-static HEADER_SIZE: usize = 5;
-
 // Types
 type BoxedOperation = Box<dyn OperationWriteExecute + Send + Sync>;
 
 // Operation Queue Item
-pub struct OperationQueueItem {
+pub struct SendableOperation {
     pub dests: Vec<String>,
     pub operation: BoxedOperation
 }
 
-impl OperationQueueItem {
+impl SendableOperation {
     pub fn write_all(&self, socket: &UdpSocket) -> BoxedErrorResult<()> {
         let serialized = self.operation.to_bytes()?;
         for dest in &self.dests {
@@ -38,7 +36,7 @@ impl OperationQueueItem {
         Ok(())
     }
     pub fn for_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
-        OperationQueueItem{
+        SendableOperation{
             dests: ips_from_ids(dest_ids),
             operation: operation
         }
@@ -70,6 +68,7 @@ pub fn read_operation(socket: &UdpSocket) -> BoxedErrorResult<(BoxedOperation, S
         .expect("Read called on an empty socket.");
     // Create the correct operation
     let operation: BoxedOperation = match buf[0] as char {
+        'H' => Box::new(bincode::deserialize::<HeartbeatOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'J' => Box::new(bincode::deserialize::<JoinOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'N' => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'M' => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),

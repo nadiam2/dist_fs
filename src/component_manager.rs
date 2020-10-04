@@ -12,8 +12,8 @@ use std::{thread, time};
 // Types
 type FrequencyInterval = Option<u64>;
 type ComponentResult = BoxedErrorResult<()>;
-pub type OperationSender = mpsc::Sender<OperationQueueItem>;
-pub type OperationReceiver = mpsc::Receiver<OperationQueueItem>;
+pub type OperationSender = mpsc::Sender<SendableOperation>;
+pub type OperationReceiver = mpsc::Receiver<SendableOperation>;
 
 // Component Starters
 pub fn start_sender(freq_interval: FrequencyInterval, receiver: OperationReceiver) {
@@ -42,6 +42,8 @@ pub fn startup(port: u16) -> BoxedErrorResult<()> {
     globals::UDP_SOCKET.write(UdpSocket::bind(&udp_socket_addr)?);
     globals::IS_JOINED.write(false);
     globals::MEMBERSHIP_LIST.write(Vec::new());
+    globals::SUCCESSOR_LIST.write(Vec::new());
+    globals::PREDECESSOR_LIST.write(Vec::new());
     globals::MY_IP_ADDR.write(udp_socket_addr.to_string());
     globals::DEBUG.write(true);
     Ok(())
@@ -82,11 +84,11 @@ fn run_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A) {
 pub fn sender(receiver: &OperationReceiver) -> ComponentResult {
     if !is_joined() { return Ok(()) }
 
-    let udp_socket = globals::UDP_SOCKET.read();
     // Send heartbeat packets
-    
+    heartbeat::send_heartbeats();
     
     // Empty the queue by sending all remaining packets
+    let udp_socket = globals::UDP_SOCKET.read();
     while let Ok(queue_item) = receiver.try_recv() {
         queue_item.write_all(&udp_socket)?;
     }
