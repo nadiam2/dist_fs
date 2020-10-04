@@ -3,7 +3,7 @@ use crate::BoxedErrorResult;
 use crate::component_manager::{log, OperationSender};
 use crate::constants::HEADER_SIZE;
 use crate::globals;
-use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, NewMemberOperation, MembershipListOperation};
+use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, LeaveOperation, NewMemberOperation, MembershipListOperation};
 use serde::{Serialize};
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -35,17 +35,20 @@ impl SendableOperation {
         log(format!("Sending a {} to {:?}", self.operation.to_string(), self.dests));
         Ok(())
     }
-    pub fn for_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
+    pub fn for_id_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
         SendableOperation{
             dests: ips_from_ids(dest_ids),
             operation: operation
         }
     }
     pub fn for_everyone(operation: BoxedOperation) -> Self {
-        Self::for_list((*globals::MEMBERSHIP_LIST.read()).clone(), operation)
+        Self::for_id_list(globals::MEMBERSHIP_LIST.read().clone(), operation)
     }
     pub fn for_single(dest_id: String, operation: BoxedOperation) -> Self {
-        Self::for_list(vec![dest_id], operation)
+        Self::for_id_list(vec![dest_id], operation)
+    }
+    pub fn for_successors(operation: BoxedOperation) -> Self {
+        Self::for_id_list(globals::SUCCESSOR_LIST.read().clone(), operation)
     }
 }
 
@@ -70,6 +73,7 @@ pub fn read_operation(socket: &UdpSocket) -> BoxedErrorResult<(BoxedOperation, S
     let operation: BoxedOperation = match buf[0] as char {
         'H' => Box::new(bincode::deserialize::<HeartbeatOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'J' => Box::new(bincode::deserialize::<JoinOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        'L' => Box::new(bincode::deserialize::<LeaveOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'N' => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
         'M' => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
         _   => return Err(String::from("Read unrecognized operation header").into())

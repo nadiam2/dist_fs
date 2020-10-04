@@ -82,15 +82,16 @@ fn run_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A) {
 
 // Components
 pub fn sender(receiver: &OperationReceiver) -> ComponentResult {
-    if !is_joined() { return Ok(()) }
-
-    // Send heartbeat packets
-    heartbeat::send_heartbeats();
-    
-    // Empty the queue by sending all remaining packets
+    // Empty the queue by sending all outstanding operations
+    // Do this before heartbeating so that we can empty after a leave
     let udp_socket = globals::UDP_SOCKET.read();
     while let Ok(queue_item) = receiver.try_recv() {
         queue_item.write_all(&udp_socket)?;
+    }
+
+    // Send heartbeat packets    
+    if is_joined() {
+        heartbeat::send_heartbeats();
     }
     Ok(())
 }

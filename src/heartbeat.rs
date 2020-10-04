@@ -11,27 +11,38 @@ type HeartBeatResult = BoxedErrorResult<()>;
 
 // TODO: Cleanup this bad boy
 pub fn join(sender: &OperationSender) -> HeartBeatResult {
-    // Add self to membership list and push the J operation onto the queue
-    if is_joined() { return Ok(()) }
-
+    if is_joined() {
+        println!("Already joined");
+        return Ok(());
+    }
     // Mark self as joined and in membership list
     globals::IS_JOINED.write(true);
     let my_id = gen_id()?;
     globals::MY_ID.write(my_id.clone());
-    (*globals::MEMBERSHIP_LIST.get_mut()).push(my_id.clone());
-
+    globals::MEMBERSHIP_LIST.get_mut().push(my_id.clone());
     // Send Join operation to everyone
-    let queue_item = SendableOperation {
+    let join_item = SendableOperation {
         dests: constants::IP_LIST.iter().map(|x| x.to_string()).collect(),
-        operation: Box::new(JoinOperation {id: my_id})
+        operation: Box::new(JoinOperation {id: my_id.clone()})
     };
-    sender.send(queue_item)?;
+    sender.send(join_item)?;
+    log(format!("Joined the network with id: {}", my_id));
     Ok(())
 }
 
-pub fn leave(_sender: &OperationSender) -> HeartBeatResult {
-    // 
-    println!("left!");
+pub fn leave(sender: &OperationSender) -> HeartBeatResult {
+    if !is_joined() {
+        println!("Not joined yet");
+        return Ok(());
+    }
+    // Send the leave operation and clear vars
+    let my_id = globals::MY_ID.read().clone();
+    let leave_item = SendableOperation::for_successors(Box::new(LeaveOperation{
+        id: my_id.clone()
+    }));
+    sender.send(leave_item)?;
+    clear_vars_on_leave();
+    log(format!("Left the network with id: {}", my_id));
     Ok(())
 }
 
@@ -48,8 +59,8 @@ pub fn print() -> HeartBeatResult {
 pub fn send_heartbeats() -> HeartBeatResult {
     let udp_socket = globals::UDP_SOCKET.read();
     let successor_list = globals::SUCCESSOR_LIST.read().clone();
-    let op = Box::new(HeartbeatOperation {});
-    let heartbeats = SendableOperation::for_list(successor_list, op);
+    let heartbeat_operation = Box::new(HeartbeatOperation {});
+    let heartbeats = SendableOperation::for_successors(heartbeat_operation);
     heartbeats.write_all(&udp_socket)
 }
 
@@ -62,12 +73,30 @@ pub fn ips_from_ids(ids: Vec<String>) -> Vec<String> {
 }
 
 pub fn insert_node(new_id: &String) -> HeartBeatResult {
-    let membership_list = globals::MEMBERSHIP_LIST.read();
+    let mut membership_list = globals::MEMBERSHIP_LIST.get_mut();
     if let Err(idx) = membership_list.binary_search(&new_id) {
-        drop(membership_list);
-        let mut membership_list = globals::MEMBERSHIP_LIST.get_mut();
         membership_list.insert(idx, new_id.to_string());
     }
+    Ok(())
+}
+
+pub fn remove_node(id: &String) -> BoxedErrorResult<bool> {
+    let mut membership_list = globals::MEMBERSHIP_LIST.get_mut();
+    match membership_list.binary_search(&id).clone() {
+        Ok(idx) => {
+            membership_list.remove(idx);
+            Ok(true)
+        }
+        Err(_) => Ok(false)
+    }
+}
+
+fn clear_vars_on_leave() -> BoxedErrorResult<()> {
+    globals::IS_JOINED.write(false);
+    globals::MEMBERSHIP_LIST.get_mut().clear();
+    globals::SUCCESSOR_LIST.get_mut().clear();
+    globals::PREDECESSOR_LIST.get_mut().clear();
+    // Does keeping the old id matter? If so, edit the locks to be able to write None back in
     Ok(())
 }
 
@@ -140,6 +169,11 @@ pub struct JoinOperation {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct LeaveOperation {
+    pub id: String
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct NewMemberOperation {
     pub id: String
 }
@@ -175,6 +209,24 @@ impl OperationWriteExecute for JoinOperation {
             membership_list: globals::MEMBERSHIP_LIST.read().clone()
         })))?;
         recalculate_neighbors()?;
+        Ok(())
+    }
+    fn to_string(&self) -> String { format!("{:?}", self) }
+}
+
+
+impl OperationWriteExecute for LeaveOperation {
+    fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
+        Ok(create_buf(&self, vec!['L' as u8]))
+    }
+    fn execute(&self, _source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
+        let removed = remove_node(&self.id)?;
+        if removed {
+            sender.send(SendableOperation::for_successors(Box::new(LeaveOperation{
+                id: self.id.clone()
+            })))?;
+            recalculate_neighbors()?;
+        }
         Ok(())
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
