@@ -5,11 +5,40 @@ use crate::globals;
 use crate::modular::*;
 use crate::operation::*;
 use serde::{Serialize, Deserialize};
+use std::collections::HashSet;
+use std::iter::FromIterator;
 use std::time::SystemTime;
 
 type HeartBeatResult = BoxedErrorResult<()>;
+pub type Timestamp = u64;
 
-// TODO: Cleanup this bad boy
+pub fn maintainer(sender: &OperationSender) -> ComponentResult {
+    if !is_joined() {
+        return Ok(())
+    }
+    // Figure out who is expired
+    let mut expired_nodes: Vec<String> = Vec::new();
+    for predecessor in globals::PREDECESSOR_LIST.read().iter() {
+        if is_expired(&predecessor)? {
+            expired_nodes.push(predecessor.clone());
+        }
+    }
+    if expired_nodes.len() > 0 {
+        // Remove the expired lads and let everyone know
+        for expired_node in expired_nodes.iter() {
+            log(format!("Detected a failure on node {}", &expired_node));
+            remove_node(&expired_node)?;
+            let leave_item = SendableOperation::for_successors(Box::new(LeaveOperation{
+                id: expired_node.clone()
+            }));
+            sender.send(leave_item)?;
+        }
+        // Update the neighbors
+        recalculate_neighbors()?;        
+    }
+    Ok(())
+}
+
 pub fn join(sender: &OperationSender) -> HeartBeatResult {
     if is_joined() {
         println!("Already joined");
@@ -49,7 +78,7 @@ pub fn leave(sender: &OperationSender) -> HeartBeatResult {
 pub fn print() -> HeartBeatResult {
     let list = globals::MEMBERSHIP_LIST.read();
     println!("[");
-    for memb in &*list {
+    for memb in list.iter() {
         println!("  {}", memb);
     }
     println!("]");
@@ -59,7 +88,9 @@ pub fn print() -> HeartBeatResult {
 pub fn send_heartbeats() -> HeartBeatResult {
     let udp_socket = globals::UDP_SOCKET.read();
     let successor_list = globals::SUCCESSOR_LIST.read().clone();
-    let heartbeat_operation = Box::new(HeartbeatOperation {});
+    let heartbeat_operation = Box::new(HeartbeatOperation {
+        id: globals::MY_ID.read().clone()
+    });
     let heartbeats = SendableOperation::for_successors(heartbeat_operation);
     heartbeats.write_all(&udp_socket)
 }
@@ -111,6 +142,7 @@ pub fn merge_membership_list(membership_list: &Vec<String>) -> HeartBeatResult {
 pub fn recalculate_neighbors() -> HeartBeatResult {
     recalculate_predecessors()?;
     recalculate_successors()?;
+    log(format!("Membership list is {:?}", &*globals::MEMBERSHIP_LIST.read()));
     Ok(())
 }
 
@@ -122,9 +154,26 @@ fn recalculate_successors() -> HeartBeatResult {
 }
 
 fn recalculate_predecessors() -> HeartBeatResult {
-    let predecessors = gen_neighbor_list(-1)?;
-    log(format!("Calculated predecessors as {:?}", predecessors));
-    globals::PREDECESSOR_LIST.write(predecessors);
+    // Get the new predecessors
+    let new_predecessors = gen_neighbor_list(-1)?;
+    log(format!("Calculated predecessors as {:?}", new_predecessors));
+    // Save the old predecessors
+    let mut predecessors = globals::PREDECESSOR_LIST.get_mut();
+    // For each deleted, remove from the timestamp dict
+    let mut predecessor_timestamps = globals::PREDECESSOR_TIMESTAMPS.get_mut();
+    let old_predecessors_set: HashSet<&String> = HashSet::from_iter(predecessors.iter());
+    let new_predecessors_set: HashSet<&String> = HashSet::from_iter(new_predecessors.iter());
+    let deleted_predecessors = &old_predecessors_set - &new_predecessors_set;
+    for deleted_predecessor in deleted_predecessors.iter() {
+        predecessor_timestamps.remove(&deleted_predecessor.to_string());
+    }
+    // For each new guy, add to the timestamp dict
+    let inserted_predecessors = &new_predecessors_set - &old_predecessors_set;
+    for inserted_predecessor in inserted_predecessors.iter() {
+        predecessor_timestamps.insert(inserted_predecessor.to_string(), get_timestamp()?);
+    }
+    // Write the new predecessors
+    *predecessors = new_predecessors;
     Ok(())
 }
 
@@ -139,10 +188,10 @@ fn gen_neighbor_list(increment: i32) -> BoxedErrorResult<Vec<String>> {
     // Traverse modulo membership list size
     let my_idx: usize = membership_list.binary_search(&*globals::MY_ID.read())
         .expect("ID of node not found in membership list");
-    let start_idx = Modular::new(my_idx as i32 + 1, len as u32);
+    let start_idx = Modular::new(my_idx as i32 + increment, len as u32);
     let mut new_neighbors = Vec::new();
     for i in 0..constants::NUM_SUCCESSORS {
-        let curr_idx = start_idx.clone() + i;
+        let curr_idx = start_idx.clone() + increment * i as i32;
         if *curr_idx == my_idx as u32 {
             break
         }
@@ -151,17 +200,32 @@ fn gen_neighbor_list(increment: i32) -> BoxedErrorResult<Vec<String>> {
     Ok(new_neighbors)
 }
 
+fn is_expired(id: &String) -> BoxedErrorResult<bool> {
+    let now = get_timestamp()?;
+    match globals::PREDECESSOR_TIMESTAMPS.read().get(&id.to_string()) {
+        Some(last_timestamp) => {
+            if now < *last_timestamp {
+                return Err("Invalid timestamp found in predecessor timestamps".into())
+            }
+            Ok(now - last_timestamp > constants::EXPIRATION_DURATION)
+        }
+        None => Err("Tried to check if non-predecessor node is expired".into())
+    }
+}
+
 fn gen_id() -> BoxedErrorResult<String> {
     Ok(format!("{}|{}", *globals::MY_IP_ADDR.read(), get_timestamp()?).to_string())
 }
 
-pub fn get_timestamp() -> BoxedErrorResult<u64> {
+pub fn get_timestamp() -> BoxedErrorResult<Timestamp> {
     Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs())
 }
 
 // Operations
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HeartbeatOperation {}
+pub struct HeartbeatOperation {
+    pub id: String
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JoinOperation {
@@ -188,8 +252,16 @@ impl OperationWriteExecute for HeartbeatOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['H' as u8]))
     }
-    fn execute(&self, _source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
-        // Update the most recent observation
+    fn execute(&self, source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+        // Assert that source and self.id correspond to same ip
+        let id_ip = ips_from_ids(vec![self.id.clone()])[0].clone();
+        if id_ip != source {
+            return Err("Received suspicious heartbeat packet with source != id".into())
+        }
+        // Update the most recent observation if this is a predecessor
+        if let Some(predecessor_entry) = globals::PREDECESSOR_TIMESTAMPS.get_mut().get_mut(&self.id) {
+            *predecessor_entry = get_timestamp()?;
+        }
         Ok(())
     }
     fn to_string(&self) -> String { format!("{:?}", self) }

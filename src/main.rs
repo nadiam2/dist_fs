@@ -22,6 +22,7 @@ fn main() -> BoxedErrorResult<()> {
     component_manager::startup(port)?;
     component_manager::start_sender(Some(1000), operation_receiver);
     component_manager::start_receiver(Some(1000), operation_sender.clone());
+    component_manager::start_maintainer(Some(500), operation_sender.clone());
     component_manager::start_console(None, operation_sender.clone());
     loop {
         thread::sleep(time::Duration::from_millis(1000));

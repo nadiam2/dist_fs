@@ -1,4 +1,6 @@
+use crate::heartbeat::Timestamp;
 use crate::locks::*;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::net::UdpSocket;
 
@@ -11,6 +13,7 @@ lazy_static! {
     pub static ref MEMBERSHIP_LIST: RwLockOption<Vec<String>> = RwLockOption::new();
     pub static ref SUCCESSOR_LIST: RwLockOption<Vec<String>> = RwLockOption::new();
     pub static ref PREDECESSOR_LIST: RwLockOption<Vec<String>> = RwLockOption::new();
+    pub static ref PREDECESSOR_TIMESTAMPS: RwLockOption<HashMap<String, Timestamp>> = RwLockOption::new();
     pub static ref MY_IP_ADDR: RwLockOption<String> = RwLockOption::new();
     pub static ref MY_ID: RwLockOption<String> = RwLockOption::new();
 }

@@ -2,6 +2,7 @@ use crate::BoxedErrorResult;
 use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, UdpSocket};
@@ -11,7 +12,7 @@ use std::{thread, time};
 
 // Types
 type FrequencyInterval = Option<u64>;
-type ComponentResult = BoxedErrorResult<()>;
+pub type ComponentResult = BoxedErrorResult<()>;
 pub type OperationSender = mpsc::Sender<SendableOperation>;
 pub type OperationReceiver = mpsc::Receiver<SendableOperation>;
 
@@ -25,6 +26,12 @@ pub fn start_sender(freq_interval: FrequencyInterval, receiver: OperationReceive
 pub fn start_receiver(freq_interval: FrequencyInterval, sender: OperationSender) {
     thread::spawn(move || {
         start_component(&mut receiver, sender, freq_interval);
+    });    
+}
+
+pub fn start_maintainer(freq_interval: FrequencyInterval, sender: OperationSender) {
+    thread::spawn(move || {
+        start_component(&mut heartbeat::maintainer, sender, freq_interval);
     });    
 }
 
@@ -44,6 +51,7 @@ pub fn startup(port: u16) -> BoxedErrorResult<()> {
     globals::MEMBERSHIP_LIST.write(Vec::new());
     globals::SUCCESSOR_LIST.write(Vec::new());
     globals::PREDECESSOR_LIST.write(Vec::new());
+    globals::PREDECESSOR_TIMESTAMPS.write(HashMap::new());
     globals::MY_IP_ADDR.write(udp_socket_addr.to_string());
     globals::DEBUG.write(true);
     Ok(())

@@ -1,3 +1,4 @@
+use crate::heartbeat::Timestamp;
 // pub const IP_LIST: [&str; 10] = [
 //     "172.22.152.56",
 //     "172.22.154.52",
@@ -21,6 +22,7 @@ pub const IP_LIST: [&str; 4] = [
 
 pub static HEADER_SIZE: usize = 5;
 pub static NUM_SUCCESSORS: u32 = 2;
+pub static EXPIRATION_DURATION: Timestamp = 3;
 
 // pub const IP_LIST: [&str; 4] = [
 //     "localhost:9000",
