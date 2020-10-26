@@ -13,6 +13,7 @@ bincode = "1.3.1"
 get_if_addrs = "0.5.3"
 # smol = "1.2.3"
 async-std = "1.6.5"
+async-trait = "0.1.41"
 # [dependencies.async-std]
 # version = "1.6.5"
 # default-features = false

@@ -14,7 +14,7 @@ use std::process::exit;
 use std::sync::{mpsc};
 
 // Types
-pub type BoxedErrorResult<T> = std::result::Result<T, Box<dyn error::Error>>;
+pub type BoxedErrorResult<T> = std::result::Result<T, Box<dyn error::Error + Send + Sync>>;
 type ArgResult = (u16);
 
 // Functions

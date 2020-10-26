@@ -54,6 +54,7 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: OperationSender) 
 pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
     startup_log_file(udp_port);
     let (udp_addr, tcp_addr) = get_socket_addrs(udp_port, udp_port+3)?;
+    // TODO: Have a better scheme for TCP port
     globals::UDP_SOCKET.write(UdpSocket::bind(&udp_addr)?);
     globals::IS_JOINED.write(false);
     globals::MEMBERSHIP_LIST.write(Vec::new());
@@ -62,7 +63,9 @@ pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
     globals::PREDECESSOR_TIMESTAMPS.write(HashMap::new());
     globals::MY_IP_ADDR.write(udp_addr.to_string());
     globals::DEBUG.write(true);
+    globals::TCP_ADDR.write(tcp_addr.clone());
     globals::SERVER_SOCKET.write(async_std::net::TcpListener::bind(tcp_addr).await?);
+    globals::UDP_TO_TCP_MAP.write(HashMap::new());
     Ok(())
 }
 
@@ -125,7 +128,7 @@ pub fn sender(receiver: &OperationReceiver) -> ComponentResult {
     // Do this before heartbeating so that we can empty after a leave
     let udp_socket = globals::UDP_SOCKET.read();
     while let Ok(queue_item) = receiver.try_recv() {
-        queue_item.write_all(&udp_socket)?;
+        queue_item.write_all_udp(&udp_socket)?;
     }
 
     // Send heartbeat packets    
@@ -139,7 +142,8 @@ pub fn receiver(sender: &OperationSender) -> ComponentResult {
     let udp_socket = globals::UDP_SOCKET.read();
     loop {
         if is_joined() {
-            let (operation, source) = read_operation(&*udp_socket)?;
+            // let (operation, source) = read_operation(&*udp_socket)?;
+            let (operation, source) = udp_socket.try_read_operation()?;
             operation.execute(source, &sender)?;
         } else {
             // Drop the packet
@@ -149,12 +153,18 @@ pub fn receiver(sender: &OperationSender) -> ComponentResult {
 }
 
 pub fn console(sender: &OperationSender) -> ComponentResult {
-    let mut line = String::new();
-    io::stdin().read_line(&mut line)?;
-    match line.trim() {
-        "join"  => heartbeat::join(sender)?,
-        "leave" => heartbeat::leave(sender)?,
-        "print" => heartbeat::print()?,
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    let mut it = input.split_whitespace();
+    let cmd = it.next().ok_or("No command given")?;
+    let args: Vec<&str> = it.collect();
+
+    match cmd.trim() {
+        "join"  => heartbeat::join(args, sender)?,
+        "leave" => heartbeat::leave(args, sender)?,
+        "print" => heartbeat::print(args, )?,
+        "get"   => filesystem::get(args)?,
         _       => println!("Invalid command. (Maybe replace with a help func)")
     }
     Ok(())
@@ -163,6 +173,13 @@ pub fn console(sender: &OperationSender) -> ComponentResult {
 // Helper Functions
 pub fn is_joined() -> bool {
     *globals::IS_JOINED.read()
+}
+
+pub fn check_joined() -> BoxedErrorResult<()> {
+    match is_joined() {
+        false => Err("Not joined yet".into()),
+        true  => Ok(())
+    }
 }
 
 fn parse_frequency(freq_interval: FrequencyInterval) -> u64 {

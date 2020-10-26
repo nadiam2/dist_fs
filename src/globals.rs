@@ -17,5 +17,7 @@ lazy_static! {
     pub static ref PREDECESSOR_TIMESTAMPS: RwLockOption<HashMap<String, Timestamp>> = RwLockOption::new();
     pub static ref MY_IP_ADDR: RwLockOption<String> = RwLockOption::new();
     pub static ref MY_ID: RwLockOption<String> = RwLockOption::new();
+    pub static ref TCP_ADDR: RwLockOption<String> = RwLockOption::new();
     pub static ref SERVER_SOCKET: RwLockOption<async_std::net::TcpListener> = RwLockOption::new();
+    pub static ref UDP_TO_TCP_MAP: RwLockOption<HashMap<String, String>> = RwLockOption::new();
 }
