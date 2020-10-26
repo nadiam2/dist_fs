@@ -40,7 +40,8 @@ pub async fn file_server<'a>(_sender: &'a OperationSender) -> BoxedErrorResult<(
 
 async fn handle_connection(mut connection: async_std::net::TcpStream) -> BoxedErrorResult<()> {
     let (operation, source) = connection.try_read_operation().await?;
-    operation.execute(source, sender)?;
+    // TODO: Think about what standard we want with these
+    let _generated_operations = operation.execute(source)?;
     Ok(())
 }
 
@@ -57,10 +58,10 @@ impl OperationWriteExecute for GetOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['G' as u8]))
     }
-    fn execute(&self, source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Assert that source and self.id correspond to same ip
-        println!("Received a GET request from {:?}", source);
-        Ok(())
+        println!("Received a GET request from {:?} for file {}", source, self.filename);
+        Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }

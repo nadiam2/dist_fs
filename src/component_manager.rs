@@ -144,7 +144,10 @@ pub fn receiver(sender: &OperationSender) -> ComponentResult {
         if is_joined() {
             // let (operation, source) = read_operation(&*udp_socket)?;
             let (operation, source) = udp_socket.try_read_operation()?;
-            operation.execute(source, &sender)?;
+            let generated_operations = operation.execute(source)?;
+            for generated_operation in generated_operations {
+                sender.send(generated_operation)?;
+            }
         } else {
             // Drop the packet
             udp_socket.recv_from(&mut vec![0])?;

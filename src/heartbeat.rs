@@ -277,7 +277,7 @@ impl OperationWriteExecute for HeartbeatOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['H' as u8]))
     }
-    fn execute(&self, source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Assert that source and self.id correspond to same ip
         let id_ip = ips_from_ids(vec![self.id.clone()])[0].clone();
         if id_ip != source {
@@ -287,7 +287,7 @@ impl OperationWriteExecute for HeartbeatOperation {
         if let Some(predecessor_entry) = globals::PREDECESSOR_TIMESTAMPS.get_mut().get_mut(&self.id) {
             *predecessor_entry = get_timestamp()?;
         }
-        Ok(())
+        Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
@@ -296,20 +296,25 @@ impl OperationWriteExecute for JoinOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['J' as u8]))
     }
-    fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Add the new guy and send it to everyone
+        let mut generated_operations: Vec<SendableOperation> = Vec::new();
         insert_node(&self.id)?;
         globals::UDP_TO_TCP_MAP.get_mut().insert(source, self.tcp_addr.clone());
-        sender.send(SendableOperation::for_everyone(Box::new(NewMemberOperation{
-            id: self.id.clone(),
-            tcp_addr: self.tcp_addr.clone()
-        })))?;
-        sender.send(SendableOperation::for_single(self.id.to_string(), Box::new(MembershipListOperation{
-            membership_list: globals::MEMBERSHIP_LIST.read().clone(),
-            udp_to_tcp_map: globals::UDP_TO_TCP_MAP.read().clone()
-        })))?;
+        generated_operations.push(
+            SendableOperation::for_everyone(Box::new(NewMemberOperation{
+                id: self.id.clone(),
+                tcp_addr: self.tcp_addr.clone()
+            }))
+        );
+        generated_operations.push(
+            SendableOperation::for_single(self.id.to_string(), Box::new(MembershipListOperation{
+                membership_list: globals::MEMBERSHIP_LIST.read().clone(),
+                udp_to_tcp_map: globals::UDP_TO_TCP_MAP.read().clone()
+            }))
+        );
         recalculate_neighbors()?;
-        Ok(())
+        Ok(generated_operations)
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
@@ -319,16 +324,19 @@ impl OperationWriteExecute for LeaveOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['L' as u8]))
     }
-    fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
+        let mut generated_operations: Vec<SendableOperation> = Vec::new();
         let removed = remove_node(&self.id)?;
         if removed {
             globals::UDP_TO_TCP_MAP.get_mut().remove(&source);
-            sender.send(SendableOperation::for_successors(Box::new(LeaveOperation{
-                id: self.id.clone()
-            })))?;
+            generated_operations.push(
+                SendableOperation::for_successors(Box::new(LeaveOperation{
+                    id: self.id.clone()
+                }))
+            );
             recalculate_neighbors()?;
         }
-        Ok(())
+        Ok(generated_operations)
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
@@ -337,12 +345,12 @@ impl OperationWriteExecute for NewMemberOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['N' as u8]))
     }
-    fn execute(&self, source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         insert_node(&self.id)?;
         globals::UDP_TO_TCP_MAP.get_mut().insert(ip_from_id(&self.id), self.tcp_addr.clone());
         // MAYBE TODO: Do we need more redundancy to make sure joins are not missed?
         recalculate_neighbors()?;
-        Ok(())
+        Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
@@ -351,11 +359,11 @@ impl OperationWriteExecute for MembershipListOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, vec!['M' as u8]))
     }
-    fn execute(&self, _source: String, _sender: &OperationSender) -> BoxedErrorResult<()> {
+    fn execute(&self, _source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         merge_membership_list(&self.membership_list)?;
         merge_tcp_map(&self.udp_to_tcp_map)?;
         recalculate_neighbors()?;
-        Ok(())
+        Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }

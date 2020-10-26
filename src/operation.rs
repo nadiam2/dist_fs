@@ -66,7 +66,7 @@ impl SendableOperation {
 // Traits
 pub trait OperationWriteExecute {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>>;
-    fn execute(&self, source: String, sender: &OperationSender) -> BoxedErrorResult<()>;
+    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>>;
     fn to_string(&self) -> String;
 }
 
@@ -129,14 +129,6 @@ impl TryReadOperationAsync for async_std::net::TcpStream {
         // Receive the full message - TODO: Some assertions on the buf_size before creating the vec?
         let mut buf: Vec<u8> = vec![0; buf_size];
         self.read_exact(&mut buf).await?;
-        // let mut read_num: usize = 0;
-        // while read_num < buf_size {
-        //     let read_now = self.read_exact(&mut buf[read_num..]).await?;
-        //     if read_now == 0 {
-        //         break;
-        //     }
-        //     read_num += read_now;
-        // }
         // Create the correct operation
         let operation = try_parse_buf(&buf)?;
         let sender = self.peer_addr()?;
