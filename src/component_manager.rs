@@ -1,8 +1,10 @@
 use crate::BoxedErrorResult;
+use crate::filesystem;
 use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
 use std::collections::HashMap;
+use std::future::Future;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, UdpSocket};
@@ -19,41 +21,48 @@ pub type OperationReceiver = mpsc::Receiver<SendableOperation>;
 // Component Starters
 pub fn start_sender(freq_interval: FrequencyInterval, receiver: OperationReceiver) {
     thread::spawn(move || {
-        start_component(&mut sender, receiver, freq_interval);
+        start_component(&mut sender, &receiver, freq_interval);
     });
 }
 
 pub fn start_receiver(freq_interval: FrequencyInterval, sender: OperationSender) {
     thread::spawn(move || {
-        start_component(&mut receiver, sender, freq_interval);
+        start_component(&mut receiver, &sender, freq_interval);
     });    
 }
 
 pub fn start_maintainer(freq_interval: FrequencyInterval, sender: OperationSender) {
     thread::spawn(move || {
-        start_component(&mut heartbeat::maintainer, sender, freq_interval);
+        start_component(&mut heartbeat::maintainer, &sender, freq_interval);
+    });    
+}
+
+pub fn start_file_server(freq_interval: FrequencyInterval, sender: OperationSender) {
+    thread::spawn(move || {
+        start_async_component(&mut filesystem::file_server, &sender, freq_interval);
     });    
 }
 
 pub fn start_console(freq_interval: FrequencyInterval, sender: OperationSender) {
     thread::spawn(move || {
-        start_component(&mut console, sender, freq_interval);
+        start_component(&mut console, &sender, freq_interval);
     });    
 
 }
 
 // Utility Functions
-pub fn startup(port: u16) -> BoxedErrorResult<()> {
-    startup_log_file(port);
-    let udp_socket_addr = get_udp_scket_addr(port)?;
-    globals::UDP_SOCKET.write(UdpSocket::bind(&udp_socket_addr)?);
+pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
+    startup_log_file(udp_port);
+    let (udp_addr, tcp_addr) = get_socket_addrs(udp_port, udp_port+3)?;
+    globals::UDP_SOCKET.write(UdpSocket::bind(&udp_addr)?);
     globals::IS_JOINED.write(false);
     globals::MEMBERSHIP_LIST.write(Vec::new());
     globals::SUCCESSOR_LIST.write(Vec::new());
     globals::PREDECESSOR_LIST.write(Vec::new());
     globals::PREDECESSOR_TIMESTAMPS.write(HashMap::new());
-    globals::MY_IP_ADDR.write(udp_socket_addr.to_string());
+    globals::MY_IP_ADDR.write(udp_addr.to_string());
     globals::DEBUG.write(true);
+    globals::SERVER_SOCKET.write(async_std::net::TcpListener::bind(tcp_addr).await?);
     Ok(())
 }
 
@@ -69,7 +78,7 @@ fn startup_log_file(port: u16) -> BoxedErrorResult<()> {
     Ok(())
 }
 
-fn start_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: A, freq_interval: FrequencyInterval) {
+fn start_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A, freq_interval: FrequencyInterval) {
     let freq = parse_frequency(freq_interval);
     loop {
         run_component(f, &arg);
@@ -79,6 +88,28 @@ fn start_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: A, freq
 
 fn run_component<T, A>(f: &mut dyn Fn(&A) -> BoxedErrorResult<T>, arg: &A) {
     let fres = f(arg);
+    // Separate ifs because the if let still experimental with another expression
+    if *globals::DEBUG.read() {
+        if let Err(e) = fres {
+            // TODO: Add some better error handling
+            println!("Error: {}", e);
+        }
+    }
+}
+
+fn start_async_component<'a, F, T, A>(f: &mut dyn Fn(&'a A) -> F, arg: &'a A, freq_interval: FrequencyInterval)
+where F: Future<Output = BoxedErrorResult<T>> {
+    let freq = parse_frequency(freq_interval);
+    loop {
+        run_async_component(f, &arg);
+        thread::sleep(time::Duration::from_millis(freq));
+    }
+    // let fres = async_std::task::block_on(f(arg));
+}
+
+fn run_async_component<'a, F, T, A>(f: &mut dyn Fn(&'a A) -> F, arg: &'a A)
+where F: Future<Output = BoxedErrorResult<T>> {
+    let fres = async_std::task::block_on(f(arg));
     // Separate ifs because the if let still experimental with another expression
     if *globals::DEBUG.read() {
         if let Err(e) = fres {
@@ -142,9 +173,11 @@ fn parse_frequency(freq_interval: FrequencyInterval) -> u64 {
 }
 
 // TODO: Eventually, change this to external IPs
-fn get_udp_scket_addr(port: u16) -> BoxedErrorResult<String> {
+fn get_socket_addrs(udp_port: u16, tcp_port: u16) -> BoxedErrorResult<(String, String)> {
     let local_addr = get_local_addr()?;
-    Ok(format!("{}:{}", local_addr, port))
+    let udp_addr = format!("{}:{}", local_addr, udp_port);
+    let tcp_addr = format!("{}:{}", local_addr, tcp_port);
+    Ok((udp_addr, tcp_addr))
 }
 
 fn get_local_addr() -> BoxedErrorResult<String> {

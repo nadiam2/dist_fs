@@ -2,11 +2,13 @@
 extern crate lazy_static;
 mod component_manager;
 mod constants;
+mod filesystem;
 mod globals;
 mod heartbeat;
 mod locks;
 mod modular;
 mod operation;
+use async_std;
 use std::{env, error, thread, time};
 use std::process::exit;
 use std::sync::{mpsc};
@@ -19,10 +21,11 @@ type ArgResult = (u16);
 fn main() -> BoxedErrorResult<()> {
     let port = parse_args_or_crash();
     let (operation_sender, operation_receiver) = mpsc::channel();
-    component_manager::startup(port)?;
+    async_std::task::block_on(component_manager::startup(port))?;
     component_manager::start_sender(Some(1000), operation_receiver);
     component_manager::start_receiver(Some(1000), operation_sender.clone());
     component_manager::start_maintainer(Some(500), operation_sender.clone());
+    component_manager::start_file_server(Some(500), operation_sender.clone());
     component_manager::start_console(None, operation_sender.clone());
     loop {
         thread::sleep(time::Duration::from_millis(1000));
