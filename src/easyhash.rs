@@ -1,4 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::UpperHex;
 use std::hash::{Hash, Hasher};
 
 pub trait EasyHash {
@@ -11,5 +12,16 @@ where T: Hash {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         hasher.finish()
+    }
+}
+
+pub trait Hex {
+    fn hex(&self) -> String;
+}
+
+impl<T> Hex for T
+where T: UpperHex {
+    fn hex(&self) -> String {
+        format!("{:X}", self)
     }
 }

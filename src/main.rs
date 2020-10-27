@@ -71,6 +71,10 @@ use crate::modular::*;
         let m3 = Modular::new(1, 7);
         assert_eq!(*(m3 - 2), 6);
         let m4 = Modular::new(6, 7);
-        assert_eq!(*(m4 + 2), 1);
+        assert_eq!(*(m4 + 2 as i32), 1);
+        let m5 = Modular::new(-5435, 1);
+        assert_eq!(*m5, 0);
+        let m6 = Modular::new(5435, 1);
+        assert_eq!(*m6, 0);
     }
 }

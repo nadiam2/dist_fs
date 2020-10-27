@@ -237,6 +237,7 @@ pub fn gen_neighbor_list_from(idx: i32, increment: i32, num_successors: u32, inc
             }
             break
         }
+        println!("idx: {:?}, start: {:?}, curr: {:?}", idx, start_idx, curr_idx);
         new_neighbors.push(membership_list[*curr_idx as usize].clone());
     }
     Ok(new_neighbors)

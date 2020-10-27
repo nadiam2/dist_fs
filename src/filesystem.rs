@@ -5,7 +5,7 @@ use async_std::task::spawn;
 use crate::BoxedErrorResult;
 use crate::component_manager::*;
 use crate::constants;
-use crate::easyhash::EasyHash;
+use crate::easyhash::{EasyHash, Hex};
 use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
@@ -15,27 +15,47 @@ use std::io::Write;
 
 pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
     check_joined()?;
-    if args.len() == 0 {
-        return Err("No filename given for 'get'".into())
+    if args.len() != 2 {
+        return Err("Usage: get distributed_filename local_path".into())
     }
 
-    let filename = args[0].to_string();
+    let distributed_filename = args[0].to_string();
+    let local_path = args[1].to_string();
+    
+    async_std::task::block_on(get_distributed_file(distributed_filename, local_path))?;
+    Ok(())   
+}
+
+async fn get_distributed_file(distributed_filename: String, local_path: String) -> BoxedErrorResult<()> {
     // TODO: Find owners
     let operation = SendableOperation::for_successors(Box::new(GetOperation {
-        filename: filename
+        filename: distributed_filename,
+        request_id: (*globals::MY_ID.read()).clone()
     }));
-    async_std::task::block_on(operation.write_all_tcp_async())?;
-    Ok(())   
+
+    let mut streams = operation
+        .write_all_tcp_async()
+        .await?;
+
+    // let (result, source) = streams[0]
+    //     .try_read_operation()
+    //     .await?;
+    // result.execute(source)?;
+    Ok(())
 }
 
 // args[0] = path to local file
 // args[1] = distributed filename
 pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
+    check_joined()?;
+    if args.len() != 2 {
+        return Err("Usage: put local_path distributed_filename".into())
+    }
+    
     let local_path = args[0];
     let distributed_filename = args[1];
     // Figure out who I am giving this file to
     let dest_ids = gen_file_owners(&distributed_filename)?;
-    // let dest_ips = heartbeat::tcp_ips_from_ids(&dest_ids);
     // Gossip who has the file now
     sender.send(
         SendableOperation::for_successors(Box::new(NewFileOperation {
@@ -50,14 +70,20 @@ pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
     Ok(())
 }
 
-async fn send_file_to_all(local_path: String, distributed_filename: String, dest_ids: &Vec<String>) ->
-BoxedErrorResult<()> {
+async fn read_file_to_buf(local_path: &String) -> BoxedErrorResult<Vec<u8>> {
     let mut data_buf: Vec<u8> = Vec::new();
     let mut file = async_std::fs::File::open(&local_path).await?;
     file.read_to_end(&mut data_buf).await?;
+    Ok(data_buf)
+}
+
+async fn send_file_to_all(local_path: String, distributed_filename: String, dest_ids: &Vec<String>) ->
+BoxedErrorResult<()> {
+    let data_buf = read_file_to_buf(&local_path).await?;
     let operation = SendableOperation::for_id_list(dest_ids.clone(), Box::new(SendFileOperation {
         filename: distributed_filename,
-        data: data_buf
+        data: data_buf,
+        is_distributed: true
     }));
     operation.write_all_tcp_async().await?;
     Ok(())
@@ -85,13 +111,19 @@ async fn handle_connection(mut connection: async_std::net::TcpStream) -> BoxedEr
 // Helpers
 fn gen_file_owners(filename: &str) -> BoxedErrorResult<Vec<String>> {
     let file_idx = filename.easyhash();
+    println!("Hex is {}", file_idx.hex());
     heartbeat::gen_neighbor_list_from(file_idx as i32, 1, constants::NUM_OWNERS, true)
+}
+
+fn distributed_file_path(filename: &String) -> String {
+    format!("{}/{}", constants::DATA_DIR, filename)
 }
 
 // Operations
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetOperation {
-    pub filename: String
+    pub filename: String,
+    pub request_id: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,7 +135,8 @@ pub struct NewFileOperation {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SendFileOperation {
     pub filename: String,
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
+    pub is_distributed: bool
 }
 
 // Trait Impls
@@ -113,6 +146,14 @@ impl OperationWriteExecute for GetOperation {
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         println!("Received a GET request from {:?} for file {}", source, self.filename);
+        let local_path = distributed_file_path(&self.filename);
+        let data_buf = async_std::task::block_on(read_file_to_buf(&local_path))?;
+        let operation = SendableOperation::for_single(self.request_id.clone(), Box::new(SendFileOperation {
+            filename: self.filename.clone(),
+            data: data_buf,
+            is_distributed: false
+        }));
+        async_std::task::block_on(operation.write_all_tcp_async());
         Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
@@ -136,7 +177,10 @@ impl OperationWriteExecute for SendFileOperation {
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // TODO: Check if the file exists before overwriting
-        let filename = format!("{}/{}", constants::DATA_DIR, self.filename);
+        let filename = match self.is_distributed {
+            true  => format!("{}/{}", constants::DATA_DIR, self.filename),
+            false => self.filename.clone()
+        };
         let mut file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)

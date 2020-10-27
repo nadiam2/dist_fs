@@ -21,7 +21,7 @@ impl Modular {
         match remainder < 0 {
             true  => {
                 let close_remainder = remainder % (modulo as i32);
-                (modulo as i32 + remainder) as u32
+                (modulo as i32 + close_remainder) as u32 % modulo
             },
             false => remainder as u32 % modulo
         }

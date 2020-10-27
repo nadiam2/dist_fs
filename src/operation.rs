@@ -25,7 +25,7 @@ pub struct SendableOperation {
 
 impl SendableOperation {
     // TODO: Maybe change these two to trait impls on the socket/stream
-    pub fn write_all_udp(&self, socket: &UdpSocket) -> BoxedErrorResult<()> {
+    pub fn write_all_udp(self, socket: &UdpSocket) -> BoxedErrorResult<()> {
         let serialized = self.operation.to_bytes()?;
         for udp_dest in &self.udp_dests {
             socket.send_to(&serialized, &udp_dest)?;
@@ -33,17 +33,20 @@ impl SendableOperation {
         log(format!("Sent a {} to {:?}", self.operation.to_string(), self.udp_dests));
         Ok(())
     }
-    pub async fn write_all_tcp_async(&self) -> BoxedErrorResult<()> {
+    pub async fn write_all_tcp_async(self) -> BoxedErrorResult<Vec<async_std::net::TcpStream>> {
         let serialized = self.operation.to_bytes()?;
         let tcp_map = globals::UDP_TO_TCP_MAP.read();
         // Collect for logging purposes
         let tcp_dests = heartbeat::tcp_ips_from_udp_ips(&self.udp_dests)?;
+        let mut streams: Vec<async_std::net::TcpStream> = Vec::new();
+        // TODO: Parallelize
         for dest in &tcp_dests {
             let mut stream = async_std::net::TcpStream::connect(dest).await?;
+            streams.push(stream.clone());
             stream.write_all(&serialized).await?;
         }
         log(format!("Sent a {} to {:?}", self.operation.to_string(), tcp_dests));
-        Ok(())        
+        Ok(streams)        
     }
     pub fn for_id_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
         SendableOperation{
