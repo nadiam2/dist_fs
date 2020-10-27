@@ -1,4 +1,5 @@
 use crate::BoxedErrorResult;
+use crate::constants;
 use crate::filesystem;
 use crate::globals;
 use crate::heartbeat;
@@ -53,6 +54,7 @@ pub fn start_console(freq_interval: FrequencyInterval, sender: OperationSender) 
 // Utility Functions
 pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
     startup_log_file(udp_port);
+    startup_data_dir();
     let (udp_addr, tcp_addr) = get_socket_addrs(udp_port, udp_port+3)?;
     // TODO: Have a better scheme for TCP port
     globals::UDP_SOCKET.write(UdpSocket::bind(&udp_addr)?);
@@ -69,10 +71,15 @@ pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
     Ok(())
 }
 
+fn startup_data_dir() -> BoxedErrorResult<()> {
+    if let Err(_) = fs::create_dir(constants::DATA_DIR) {}
+    Ok(())
+}
+
 fn startup_log_file(port: u16) -> BoxedErrorResult<()> {
-    if let Err(_) = fs::create_dir("logs") {}
+    if let Err(_) = fs::create_dir(constants::LOG_DIR) {}
     let timestamp = heartbeat::get_timestamp()?;
-    let debug_file = format!("logs/port_{}_{:020}.txt", port, timestamp);
+    let debug_file = format!("{}/port_{}_{:020}.txt", constants::LOG_DIR, port, timestamp);
     globals::LOG_FILE.write(OpenOptions::new()
                               .read(true)
                               .write(true)
@@ -168,6 +175,7 @@ pub fn console(sender: &OperationSender) -> ComponentResult {
         "leave" => heartbeat::leave(args, sender)?,
         "print" => heartbeat::print(args, )?,
         "get"   => filesystem::get(args)?,
+        "put"   => filesystem::put(args, sender)?,
         _       => println!("Invalid command. (Maybe replace with a help func)")
     }
     Ok(())

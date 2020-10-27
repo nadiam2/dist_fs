@@ -98,7 +98,13 @@ pub fn send_heartbeats() -> HeartBeatResult {
 }
 
 // Helpers
-pub fn ips_from_ids(ids: Vec<String>) -> Vec<String> {
+pub fn is_master() -> bool {
+    // TODO: Eliminate the need for a master in the final product
+    let membership_list = globals::MEMBERSHIP_LIST.read();
+    membership_list.len() > 0 && membership_list[0] == *globals::MY_ID.read()
+}
+
+pub fn ips_from_ids(ids: &Vec<String>) -> Vec<String> {
     ids.iter().map(|x| {
         ip_from_id(x)
     }).collect()
@@ -117,6 +123,11 @@ pub fn tcp_ips_from_udp_ips(udp_ips: &Vec<String>) -> BoxedErrorResult<Vec<Strin
                     .ok_or(format!("No TCP addr entry for destination {}", udp_ip))?.to_string());
     }
     Ok(output)
+}
+
+pub fn tcp_ips_from_ids(ids: &Vec<String>) -> BoxedErrorResult<Vec<String>> {
+    let udp_ips = ips_from_ids(&ids);
+    tcp_ips_from_udp_ips(&udp_ips)
 }
 
 pub fn insert_node(new_id: &String) -> HeartBeatResult {
@@ -210,16 +221,26 @@ fn gen_neighbor_list(increment: i32) -> BoxedErrorResult<Vec<String>> {
     // Traverse modulo membership list size
     let my_idx: usize = membership_list.binary_search(&*globals::MY_ID.read())
         .expect("ID of node not found in membership list");
-    let start_idx = Modular::new(my_idx as i32 + increment, len as u32);
+    gen_neighbor_list_from(my_idx as i32, increment, constants::NUM_SUCCESSORS, false)
+}
+
+pub fn gen_neighbor_list_from(idx: i32, increment: i32, num_successors: u32, include_self: bool) -> BoxedErrorResult<Vec<String>> {
+    let membership_list = globals::MEMBERSHIP_LIST.read();
+    let len = membership_list.len();
+    let start_idx = Modular::new(idx + increment, len as u32);
     let mut new_neighbors = Vec::new();
-    for i in 0..constants::NUM_SUCCESSORS {
+    for i in 0..num_successors {
         let curr_idx = start_idx.clone() + increment * i as i32;
-        if *curr_idx == my_idx as u32 {
+        if *curr_idx == idx as u32 {
+            if include_self {
+                new_neighbors.push(membership_list[*curr_idx as usize].clone());
+            }
             break
         }
         new_neighbors.push(membership_list[*curr_idx as usize].clone());
     }
     Ok(new_neighbors)
+    
 }
 
 fn is_expired(id: &String) -> BoxedErrorResult<bool> {
@@ -279,8 +300,8 @@ impl OperationWriteExecute for HeartbeatOperation {
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Assert that source and self.id correspond to same ip
-        let id_ip = ips_from_ids(vec![self.id.clone()])[0].clone();
-        if id_ip != source {
+        let src_ip = ip_from_id(&self.id);
+        if src_ip != source {
             return Err("Received suspicious heartbeat packet with source != id".into())
         }
         // Update the most recent observation if this is a predecessor

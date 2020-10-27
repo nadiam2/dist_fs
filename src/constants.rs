@@ -21,7 +21,11 @@ pub const IP_LIST: [&str; 4] = [
 pub static OP_TYPE_SIZE: usize = 4;
 pub static HEADER_SIZE: usize = 8;
 pub static NUM_SUCCESSORS: u32 = 2;
+pub static NUM_OWNERS: u32 = 2;
 pub static EXPIRATION_DURATION: Timestamp = 3;
+
+pub static LOG_DIR: &str  = "logs";
+pub static DATA_DIR: &str = "data";
 
 // pub const IP_LIST: [&str; 4] = [
 //     "localhost:9000",

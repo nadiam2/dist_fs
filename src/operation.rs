@@ -6,7 +6,7 @@ use bincode;
 use crate::BoxedErrorResult;
 use crate::component_manager::{log, OperationSender};
 use crate::constants::{HEADER_SIZE, OP_TYPE_SIZE};
-use crate::filesystem::{GetOperation};
+use crate::filesystem::{GetOperation, NewFileOperation, SendFileOperation};
 use crate::globals;
 use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, LeaveOperation, NewMemberOperation, MembershipListOperation, self};
 use serde::{Serialize};
@@ -39,7 +39,6 @@ impl SendableOperation {
         // Collect for logging purposes
         let tcp_dests = heartbeat::tcp_ips_from_udp_ips(&self.udp_dests)?;
         for dest in &tcp_dests {
-            println!("Going to connect to {}", &dest);
             let mut stream = async_std::net::TcpStream::connect(dest).await?;
             stream.write_all(&serialized).await?;
         }
@@ -48,7 +47,7 @@ impl SendableOperation {
     }
     pub fn for_id_list(dest_ids: Vec<String>, operation: BoxedOperation) -> Self {
         SendableOperation{
-            udp_dests: ips_from_ids(dest_ids),
+            udp_dests: ips_from_ids(&dest_ids),
             operation: operation
         }
     }
@@ -106,6 +105,8 @@ fn try_parse_buf(buf: &Vec<u8>) -> BoxedErrorResult<BoxedOperation> {
         "NMEM" => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "MLIS" => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "GET " => Box::new(bincode::deserialize::<GetOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "NFIL" => Box::new(bincode::deserialize::<NewFileOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "FILE" => Box::new(bincode::deserialize::<SendFileOperation>(&buf[HEADER_SIZE..]).unwrap()),
         _   => return Err(String::from("Read unrecognized operation header").into())
     };
     Ok(operation)
