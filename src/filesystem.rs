@@ -22,9 +22,28 @@ pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
         filename: filename
     }));
     async_std::task::block_on(operation.write_all_tcp_async())?;
-    Ok(())
-    
+    Ok(())   
 }
+
+// args[0] = path to local file
+// args[1] = distributed filename
+// pub fn put(args: Vec<&str>, sender: &OperationSender) {
+//     let local_path = args[0];
+//     let distributed_filename = args[1];
+//     // Figure out who I am giving this file to
+//     let dests = gen_file_owners(&distributed_filename);
+//     // Send them the file
+//     for dest in &dests {
+//         // SEND THE THING
+//     }
+//     // Gossip who has the file now
+//     sender.send(
+//         SendableOperation::for_successors(Box::new(NewFileOperation {
+//             filename: distributed_filename.to_string(),
+//             owners: dests
+//         }))
+//     )?;
+// }
 
 pub async fn file_server<'a>(_sender: &'a OperationSender) -> BoxedErrorResult<()> {
     let server = globals::SERVER_SOCKET.read();
@@ -40,6 +59,7 @@ pub async fn file_server<'a>(_sender: &'a OperationSender) -> BoxedErrorResult<(
 
 async fn handle_connection(mut connection: async_std::net::TcpStream) -> BoxedErrorResult<()> {
     let (operation, source) = connection.try_read_operation().await?;
+    println!("reached");
     // TODO: Think about what standard we want with these
     let _generated_operations = operation.execute(source)?;
     Ok(())
@@ -56,7 +76,7 @@ pub struct GetOperation {
 // Trait Impls
 impl OperationWriteExecute for GetOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['G' as u8]))
+        Ok(create_buf(&self, str_to_vec("GET ")))
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Assert that source and self.id correspond to same ip

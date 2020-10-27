@@ -275,7 +275,7 @@ pub struct MembershipListOperation {
 // Trait Impls
 impl OperationWriteExecute for HeartbeatOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['H' as u8]))
+        Ok(create_buf(&self, str_to_vec("HB  ")))
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Assert that source and self.id correspond to same ip
@@ -294,7 +294,7 @@ impl OperationWriteExecute for HeartbeatOperation {
 
 impl OperationWriteExecute for JoinOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['J' as u8]))
+        Ok(create_buf(&self, str_to_vec("JOIN")))
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         // Add the new guy and send it to everyone
@@ -322,7 +322,7 @@ impl OperationWriteExecute for JoinOperation {
 
 impl OperationWriteExecute for LeaveOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['L' as u8]))
+        Ok(create_buf(&self, str_to_vec("LEAV")))
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         let mut generated_operations: Vec<SendableOperation> = Vec::new();
@@ -343,7 +343,7 @@ impl OperationWriteExecute for LeaveOperation {
 
 impl OperationWriteExecute for NewMemberOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['N' as u8]))
+        Ok(create_buf(&self, str_to_vec("NMEM")))
     }
     fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         insert_node(&self.id)?;
@@ -357,7 +357,7 @@ impl OperationWriteExecute for NewMemberOperation {
 
 impl OperationWriteExecute for MembershipListOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, vec!['M' as u8]))
+        Ok(create_buf(&self, str_to_vec("MLIS")))
     }
     fn execute(&self, _source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
         merge_membership_list(&self.membership_list)?;

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bincode;
 use crate::BoxedErrorResult;
 use crate::component_manager::{log, OperationSender};
-use crate::constants::HEADER_SIZE;
+use crate::constants::{HEADER_SIZE, OP_TYPE_SIZE};
 use crate::filesystem::{GetOperation};
 use crate::globals;
 use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, LeaveOperation, NewMemberOperation, MembershipListOperation, self};
@@ -74,7 +74,7 @@ pub trait OperationWriteExecute {
 pub fn create_buf<T>(obj: &T, mut base: Vec<u8>) -> Vec<u8>
 where T: Serialize {
     let serialized = bincode::serialize(obj).unwrap();
-    let size: u32 = (5 + serialized.len()) as u32;
+    let size: u32 = (HEADER_SIZE + serialized.len()) as u32;
     base.extend_from_slice(&size.to_le_bytes());
     base.extend_from_slice(&serialized);
     return base;
@@ -89,14 +89,23 @@ pub trait TryReadOperationAsync {
     async fn try_read_operation(&mut self) -> BoxedErrorResult<(BoxedOperation, String)>;
 }
 
+// If s contains unicode, this is screwed. So don't do that :)
+pub fn str_to_vec(s: &str) -> Vec<u8> {
+    s.chars().map(|c| c as u8).collect()
+}
+
+pub fn vec_to_str(v: &Vec<u8>) -> String {
+    v[..OP_TYPE_SIZE].iter().map(|b| b.clone() as char).collect::<String>()
+}
+
 fn try_parse_buf(buf: &Vec<u8>) -> BoxedErrorResult<BoxedOperation> {
-    let operation: BoxedOperation = match buf[0] as char {
-        'H' => Box::new(bincode::deserialize::<HeartbeatOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        'J' => Box::new(bincode::deserialize::<JoinOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        'L' => Box::new(bincode::deserialize::<LeaveOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        'N' => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        'M' => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        'G' => Box::new(bincode::deserialize::<GetOperation>(&buf[HEADER_SIZE..]).unwrap()),
+    let operation: BoxedOperation = match vec_to_str(&buf).as_str() {
+        "HB  " => Box::new(bincode::deserialize::<HeartbeatOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "JOIN" => Box::new(bincode::deserialize::<JoinOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "LEAV" => Box::new(bincode::deserialize::<LeaveOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "NMEM" => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "MLIS" => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "GET " => Box::new(bincode::deserialize::<GetOperation>(&buf[HEADER_SIZE..]).unwrap()),
         _   => return Err(String::from("Read unrecognized operation header").into())
     };
     Ok(operation)
@@ -107,7 +116,7 @@ impl TryReadOperation for UdpSocket {
         // Parse the header
         let mut header: Vec<u8> = vec![0; HEADER_SIZE];
         let _ = self.peek_from(&mut header).expect("Read called on an empty UDP socket.");
-        let buf_size: u32 = u32::from_le_bytes(header[1..5].try_into()?);
+        let buf_size: u32 = u32::from_le_bytes(header[OP_TYPE_SIZE..OP_TYPE_SIZE+4].try_into()?);
         // Receive the full message - TODO: Some assertions on the buf_size before creating the vec?
         let mut buf: Vec<u8> = vec![0; buf_size as usize];
         let (_, sender) = self.recv_from(&mut buf)
@@ -125,7 +134,7 @@ impl TryReadOperationAsync for async_std::net::TcpStream {
         // Parse the header
         let mut header: Vec<u8> = vec![0; HEADER_SIZE];
         let _ = self.peek(&mut header).await.expect("Read called on an empty TcpStream");
-        let buf_size: usize = u32::from_le_bytes(header[1..5].try_into()?) as usize;
+        let buf_size: usize = u32::from_le_bytes(header[OP_TYPE_SIZE..OP_TYPE_SIZE+4].try_into()?) as usize;
         // Receive the full message - TODO: Some assertions on the buf_size before creating the vec?
         let mut buf: Vec<u8> = vec![0; buf_size];
         self.read_exact(&mut buf).await?;
