@@ -10,6 +10,7 @@ use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
 use serde::{Serialize, Deserialize};
+use std::convert::TryInto;
 use std::future::Future;
 use std::io::Write;
 
@@ -29,18 +30,19 @@ pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
 async fn get_distributed_file(distributed_filename: String, local_path: String) -> BoxedErrorResult<()> {
     // TODO: Find owners
     let operation = SendableOperation::for_successors(Box::new(GetOperation {
-        filename: distributed_filename,
-        request_id: (*globals::MY_ID.read()).clone()
+        distributed_filename: distributed_filename,
+        local_path: local_path
     }));
 
     let mut streams = operation
         .write_all_tcp_async()
         .await?;
 
-    // let (result, source) = streams[0]
-    //     .try_read_operation()
-    //     .await?;
-    // result.execute(source)?;
+    // TODO: Redo whatever tf going on here
+    let (result, source) = streams[0]
+        .try_read_operation()
+        .await?;
+    result.execute(source)?;
     Ok(())
 }
 
@@ -111,7 +113,6 @@ async fn handle_connection(mut connection: async_std::net::TcpStream) -> BoxedEr
 // Helpers
 fn gen_file_owners(filename: &str) -> BoxedErrorResult<Vec<String>> {
     let file_idx = filename.easyhash();
-    println!("Hex is {}", file_idx.hex());
     heartbeat::gen_neighbor_list_from(file_idx as i32, 1, constants::NUM_OWNERS, true)
 }
 
@@ -122,8 +123,8 @@ fn distributed_file_path(filename: &String) -> String {
 // Operations
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetOperation {
-    pub filename: String,
-    pub request_id: String
+    pub distributed_filename: String,
+    pub local_path: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -144,15 +145,16 @@ impl OperationWriteExecute for GetOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, str_to_vec("GET ")))
     }
-    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
-        println!("Received a GET request from {:?} for file {}", source, self.filename);
-        let local_path = distributed_file_path(&self.filename);
+    fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
+        let local_path = distributed_file_path(&self.distributed_filename);
         let data_buf = async_std::task::block_on(read_file_to_buf(&local_path))?;
-        let operation = SendableOperation::for_single(self.request_id.clone(), Box::new(SendFileOperation {
-            filename: self.filename.clone(),
-            data: data_buf,
-            is_distributed: false
-        }));
+        let operation = SendableOperation::for_single_tcp_stream(
+            TryInto::<async_std::net::TcpStream>::try_into(source)?,
+            Box::new(SendFileOperation {
+                filename: self.local_path.clone(),
+                data: data_buf,
+                is_distributed: false
+            }));
         async_std::task::block_on(operation.write_all_tcp_async());
         Ok(vec![])
     }
@@ -163,7 +165,7 @@ impl OperationWriteExecute for NewFileOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, str_to_vec("NFIL")))
     }
-    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
+    fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         // TODO: Add this file to your map with the new people that have it
         println!("Received mention of a new file from {:?} for file {} and owners {:?}", source, self.filename, self.owners);
         Ok(vec![])
@@ -175,7 +177,7 @@ impl OperationWriteExecute for SendFileOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, str_to_vec("FILE")))
     }
-    fn execute(&self, source: String) -> BoxedErrorResult<Vec<SendableOperation>> {
+    fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         // TODO: Check if the file exists before overwriting
         let filename = match self.is_distributed {
             true  => format!("{}/{}", constants::DATA_DIR, self.filename),
