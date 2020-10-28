@@ -92,6 +92,19 @@ impl SendableOperation {
     pub fn for_successors(operation: BoxedOperation) -> Self {
         Self::for_id_list(globals::SUCCESSOR_LIST.read().clone(), operation)
     }
+    pub fn for_owners(filename: &String, operation: BoxedOperation) -> Self {
+        let id_list: Vec<String> = match globals::ALL_FILE_OWNERS.read().get(filename) {
+            Some(owners) => {
+                owners.iter()
+                      .map(|x| x.to_string())
+                      .collect()
+            },
+            None => {
+                vec![]
+            }
+        };
+        Self::for_id_list(id_list, operation)
+    }
 }
 
 #[derive(Debug, Clone)]

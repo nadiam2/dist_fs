@@ -12,6 +12,7 @@ use crate::operation::*;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashSet};
 use std::convert::TryInto;
+use std::fmt;
 use std::future::Future;
 use std::io::Write;
 
@@ -91,7 +92,8 @@ fn print_file_owners(maybe_distributed_filename: Option<&str>, full: bool) -> Bo
                 },
                 None => {
                     // A little unoptimal - change if above format changes
-                    println!("{{}}");                }
+                    println!("{{}}");
+                }
             }
             Ok(())
         },
@@ -108,8 +110,8 @@ fn print_file_owners(maybe_distributed_filename: Option<&str>, full: bool) -> Bo
 
 async fn get_distributed_file(distributed_filename: String, local_path: String) -> BoxedErrorResult<()> {
     // TODO: Find owners
-    let operation = SendableOperation::for_successors(Box::new(GetOperation {
-        distributed_filename: distributed_filename,
+    let operation = SendableOperation::for_owners(&distributed_filename, Box::new(GetOperation {
+        distributed_filename: distributed_filename.clone(),
         local_path: local_path
     }));
 
@@ -186,7 +188,7 @@ pub struct NewFileOperation {
     pub owners: HashSet<String>
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SendFileOperation {
     pub filename: String,
     pub data: Vec<u8>,
@@ -222,13 +224,15 @@ impl OperationWriteExecute for NewFileOperation {
         // TODO: Add this file to your map with the new people that have it
         let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
         let mut file_owners = all_file_owners.entry(self.distributed_filename.clone()).or_insert(HashSet::new());
-        *file_owners = file_owners
-            .union(&self.owners)
-            .map(|x| x.to_string())
-            .collect();
-        
-        let forwarded = vec![SendableOperation::for_successors(Box::new(self.clone()))];
-        Ok(forwarded)
+        match (&self.owners - file_owners).len() {
+            0 => {
+                Ok(vec![])
+            },
+            _ => {
+                *file_owners = &self.owners | file_owners;
+                Ok(vec![SendableOperation::for_successors(Box::new(self.clone()))])
+            }
+        }
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
@@ -254,5 +258,18 @@ impl OperationWriteExecute for SendFileOperation {
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
 
-
+impl fmt::Debug for SendFileOperation {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let formatted_data  = if self.data.len() > 40 {
+            format!("{:?}...", &self.data[..40])
+        } else {
+            format!("{:?}", &self.data)
+        }; 
+        fmt.debug_struct("SendFileOperation")
+            .field("filename", &self.filename)
+            .field("data", &formatted_data)
+            .field("is_distributed", &self.is_distributed)
+            .finish()
+    }
+}
 

@@ -309,6 +309,7 @@ impl OperationWriteExecute for HeartbeatOperation {
         if let Some(predecessor_entry) = globals::PREDECESSOR_TIMESTAMPS.get_mut().get_mut(&self.id) {
             *predecessor_entry = get_timestamp()?;
         }
+        // TODO: Maybe add user back in case of accidental leave packet - may need more synchronization
         Ok(vec![])
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
