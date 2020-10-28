@@ -2,7 +2,7 @@ use async_std;
 use async_std::io::ReadExt;
 use async_std::stream::StreamExt;
 use async_std::task::spawn;
-use crate::BoxedErrorResult;
+use crate::{BoxedError, BoxedErrorResult};
 use crate::component_manager::*;
 use crate::constants;
 use crate::easyhash::{EasyHash, Hex};
@@ -10,6 +10,7 @@ use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
 use serde::{Serialize, Deserialize};
+use std::collections::{HashSet};
 use std::convert::TryInto;
 use std::future::Future;
 use std::io::Write;
@@ -25,6 +26,84 @@ pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
     
     async_std::task::block_on(get_distributed_file(distributed_filename, local_path))?;
     Ok(())   
+}
+
+// args[0] = path to local file
+// args[1] = distributed filename
+pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
+    check_joined()?;
+    if args.len() != 2 {
+        return Err("Usage: put local_path distributed_filename".into())
+    }
+    
+    let local_path = args[0];
+    let distributed_filename = args[1];
+    // Figure out who I am giving this file to
+    let dest_ids = gen_file_owners(&distributed_filename)?;
+    // Gossip who has the file now
+    sender.send(
+        SendableOperation::for_successors(Box::new(NewFileOperation {
+            distributed_filename: distributed_filename.to_string(),
+            owners: dest_ids
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<HashSet<_>>()
+        }))
+    )?;
+    // Send them the file
+    async_std::task::block_on(send_file_to_all(local_path.to_string(),
+                                               distributed_filename.to_string(),
+                                               &dest_ids))?;
+    Ok(())
+}
+
+pub fn ls(args: Vec<&str>) -> BoxedErrorResult<()> {
+    check_joined()?;
+    let invalid_args: BoxedErrorResult<()> = Err("Usage: ls [distributed_filename]".into());
+    match args.len() {
+        0 => {
+            // All
+            print_file_owners(None, true)?;            
+            Ok(())
+        },
+        1 => {
+            // Just File
+            let distributed_filename = args[0];
+            print_file_owners(Some(distributed_filename), false)?;
+            Ok(())
+        },
+        _ => invalid_args
+    }
+}
+
+// TODO: You wrote this very late - maybe fix
+fn print_file_owners(maybe_distributed_filename: Option<&str>, full: bool) -> BoxedErrorResult<()> {
+    let all_file_owners = globals::ALL_FILE_OWNERS.read();
+    match (maybe_distributed_filename, full) {
+        (Some(_), true) => {
+           Err("Cannot set distributed_filename and full to true when printing owners".into())
+        },
+        (Some(distributed_filename), false) => {
+            // Print the files owners
+            match all_file_owners.get(distributed_filename) {
+                Some(owners) => {
+                    println!("{:?}", owners);
+                },
+                None => {
+                    // A little unoptimal - change if above format changes
+                    println!("{{}}");                }
+            }
+            Ok(())
+        },
+        (None, true) => {
+            // Print the whole map
+            println!("{:?}", *all_file_owners);
+            Ok(())
+        },
+        (None, false) => {
+            Err("Cannot print owners of nonexistant distributed_filename with full set to false".into())
+        }
+    }
 }
 
 async fn get_distributed_file(distributed_filename: String, local_path: String) -> BoxedErrorResult<()> {
@@ -43,32 +122,6 @@ async fn get_distributed_file(distributed_filename: String, local_path: String) 
         .try_read_operation()
         .await?;
     result.execute(source)?;
-    Ok(())
-}
-
-// args[0] = path to local file
-// args[1] = distributed filename
-pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
-    check_joined()?;
-    if args.len() != 2 {
-        return Err("Usage: put local_path distributed_filename".into())
-    }
-    
-    let local_path = args[0];
-    let distributed_filename = args[1];
-    // Figure out who I am giving this file to
-    let dest_ids = gen_file_owners(&distributed_filename)?;
-    // Gossip who has the file now
-    sender.send(
-        SendableOperation::for_successors(Box::new(NewFileOperation {
-            filename: distributed_filename.to_string(),
-            owners: dest_ids.clone()
-        }))
-    )?;
-    // Send them the file
-    async_std::task::block_on(send_file_to_all(local_path.to_string(),
-                                               distributed_filename.to_string(),
-                                               &dest_ids))?;
     Ok(())
 }
 
@@ -121,19 +174,19 @@ fn distributed_file_path(filename: &String) -> String {
 }
 
 // Operations
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GetOperation {
     pub distributed_filename: String,
     pub local_path: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NewFileOperation {
-    pub filename: String,
-    pub owners: Vec<String>
+    pub distributed_filename: String,
+    pub owners: HashSet<String>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SendFileOperation {
     pub filename: String,
     pub data: Vec<u8>,
@@ -167,8 +220,15 @@ impl OperationWriteExecute for NewFileOperation {
     }
     fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         // TODO: Add this file to your map with the new people that have it
-        println!("Received mention of a new file from {:?} for file {} and owners {:?}", source, self.filename, self.owners);
-        Ok(vec![])
+        let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
+        let mut file_owners = all_file_owners.entry(self.distributed_filename.clone()).or_insert(HashSet::new());
+        *file_owners = file_owners
+            .union(&self.owners)
+            .map(|x| x.to_string())
+            .collect();
+        
+        let forwarded = vec![SendableOperation::for_successors(Box::new(self.clone()))];
+        Ok(forwarded)
     }
     fn to_string(&self) -> String { format!("{:?}", self) }
 }

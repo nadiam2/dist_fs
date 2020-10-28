@@ -266,29 +266,29 @@ pub fn get_timestamp() -> BoxedErrorResult<Timestamp> {
 }
 
 // Operations
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HeartbeatOperation {
     pub id: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JoinOperation {
     pub id: String,
     pub tcp_addr: String 
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LeaveOperation {
     pub id: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NewMemberOperation {
     pub id: String,
     pub tcp_addr: String 
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MembershipListOperation {
     membership_list: Vec<String>,
     udp_to_tcp_map: HashMap<String, String>

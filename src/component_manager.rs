@@ -68,6 +68,7 @@ pub async fn startup(udp_port: u16) -> BoxedErrorResult<()> {
     globals::TCP_ADDR.write(tcp_addr.clone());
     globals::SERVER_SOCKET.write(async_std::net::TcpListener::bind(tcp_addr).await?);
     globals::UDP_TO_TCP_MAP.write(HashMap::new());
+    globals::ALL_FILE_OWNERS.write(HashMap::new());
     Ok(())
 }
 
@@ -176,6 +177,7 @@ pub fn console(sender: &OperationSender) -> ComponentResult {
         "print" => heartbeat::print(args, )?,
         "get"   => filesystem::get(args)?,
         "put"   => filesystem::put(args, sender)?,
+        "ls"    => filesystem::ls(args)?,
         _       => println!("Invalid command. (Maybe replace with a help func)")
     }
     Ok(())

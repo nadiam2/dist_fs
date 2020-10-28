@@ -2,7 +2,7 @@ use async_std;
 use crate::heartbeat::Timestamp;
 use crate::locks::*;
 use std;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 
 // Vars
@@ -20,4 +20,5 @@ lazy_static! {
     pub static ref TCP_ADDR: RwLockOption<String> = RwLockOption::new();
     pub static ref SERVER_SOCKET: RwLockOption<async_std::net::TcpListener> = RwLockOption::new();
     pub static ref UDP_TO_TCP_MAP: RwLockOption<HashMap<String, String>> = RwLockOption::new();
+    pub static ref ALL_FILE_OWNERS: RwLockOption<HashMap<String, HashSet<String>>> = RwLockOption::new();
 }
