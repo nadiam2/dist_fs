@@ -6,9 +6,9 @@ use bincode;
 use crate::{BoxedError, BoxedErrorResult};
 use crate::component_manager::{log, OperationSender};
 use crate::constants::{HEADER_SIZE, OP_TYPE_SIZE};
-use crate::filesystem::{GetOperation, NewFileOperation, SendFileOperation};
+use crate::filesystem::{GetOperation, LostFilesOperation, NewFileOwnersOperation, SendFileOperation};
 use crate::globals;
-use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, LeaveOperation, NewMemberOperation, MembershipListOperation, self};
+use crate::heartbeat::{ips_from_ids, HeartbeatOperation, JoinOperation, LeaveOperation, NewMemberOperation, MemberInitializationOperation, self};
 use serde::{Serialize};
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -133,10 +133,17 @@ impl TryInto<async_std::net::TcpStream> for Source {
     }
 }
 
+impl Source {
+    pub fn myself() -> Self {
+        Source::Addr(globals::MY_IP_ADDR.read().clone())
+    }
+}
+
 
 // Traits
 pub trait OperationWriteExecute {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>>;
+    // TODO: Make the source a borrow so that filesystem::handle_failed_node doesn't have to clone so much
     fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>>;
     fn to_string(&self) -> String;
 }
@@ -185,10 +192,11 @@ fn try_parse_buf(buf: &Vec<u8>) -> BoxedErrorResult<BoxedOperation> {
         "JOIN" => Box::new(bincode::deserialize::<JoinOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "LEAV" => Box::new(bincode::deserialize::<LeaveOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "NMEM" => Box::new(bincode::deserialize::<NewMemberOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        "MLIS" => Box::new(bincode::deserialize::<MembershipListOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "MLIS" => Box::new(bincode::deserialize::<MemberInitializationOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "GET " => Box::new(bincode::deserialize::<GetOperation>(&buf[HEADER_SIZE..]).unwrap()),
-        "NFIL" => Box::new(bincode::deserialize::<NewFileOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "NFO " => Box::new(bincode::deserialize::<NewFileOwnersOperation>(&buf[HEADER_SIZE..]).unwrap()),
         "FILE" => Box::new(bincode::deserialize::<SendFileOperation>(&buf[HEADER_SIZE..]).unwrap()),
+        "LOST" => Box::new(bincode::deserialize::<LostFilesOperation>(&buf[HEADER_SIZE..]).unwrap()),
         _   => return Err(String::from("Read unrecognized operation header").into())
     };
     Ok(operation)

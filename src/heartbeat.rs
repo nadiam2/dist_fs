@@ -1,6 +1,7 @@
 use crate::BoxedErrorResult;
 use crate::component_manager::*;
 use crate::constants;
+use crate::filesystem;
 use crate::globals;
 use crate::modular::*;
 use crate::operation::*;
@@ -28,14 +29,14 @@ pub fn maintainer(sender: &OperationSender) -> ComponentResult {
         // Remove the expired lads and let everyone know
         for expired_node in expired_nodes.iter() {
             log(format!("Detected a failure on node {}", &expired_node));
-            remove_node(&expired_node)?;
-            let leave_item = SendableOperation::for_successors(Box::new(LeaveOperation{
+            let leave_operation = LeaveOperation{
                 id: expired_node.clone()
-            }));
-            sender.send(leave_item)?;
+            };
+            let mut generated_operations = leave_operation.execute(Source::myself())?;
+            for generated_operation in generated_operations.drain(..) {
+                sender.send(generated_operation)?;
+            }
         }
-        // Update the neighbors
-        recalculate_neighbors()?;        
     }
     Ok(())
 }
@@ -172,6 +173,16 @@ pub fn merge_tcp_map(udp_to_tcp_map: &HashMap<String, String>) -> HeartBeatResul
     Ok(())
 }
 
+pub fn merge_all_file_owners(new_file_owners: &HashMap<String, HashSet<String>>) -> HeartBeatResult {
+    let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
+    for (filename, new_owners) in new_file_owners.iter() {
+        let mut file_owners = all_file_owners.entry(filename.to_string()).or_insert(HashSet::new());
+        // TODO: Another place to reduce clones/allocations -> Cows could help here and in a lot of other places
+        *file_owners = file_owners.union(new_owners).map(|x| x.to_string()).collect();
+    }
+    Ok(())
+}
+
 pub fn recalculate_neighbors() -> HeartBeatResult {
     recalculate_predecessors()?;
     recalculate_successors()?;
@@ -289,9 +300,10 @@ pub struct NewMemberOperation {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MembershipListOperation {
+pub struct MemberInitializationOperation {
     membership_list: Vec<String>,
-    udp_to_tcp_map: HashMap<String, String>
+    udp_to_tcp_map: HashMap<String, String>,
+    all_file_owners: HashMap<String, HashSet<String>>
 }
 
 // Trait Impls
@@ -331,9 +343,10 @@ impl OperationWriteExecute for JoinOperation {
             }))
         );
         generated_operations.push(
-            SendableOperation::for_single(self.id.to_string(), Box::new(MembershipListOperation{
+            SendableOperation::for_single(self.id.to_string(), Box::new(MemberInitializationOperation{
                 membership_list: globals::MEMBERSHIP_LIST.read().clone(),
-                udp_to_tcp_map: globals::UDP_TO_TCP_MAP.read().clone()
+                udp_to_tcp_map: globals::UDP_TO_TCP_MAP.read().clone(),
+                all_file_owners: globals::ALL_FILE_OWNERS.read().clone()
             }))
         );
         recalculate_neighbors()?;
@@ -347,17 +360,16 @@ impl OperationWriteExecute for LeaveOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, str_to_vec("LEAV")))
     }
-    fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
+    fn execute(&self, _source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         let mut generated_operations: Vec<SendableOperation> = Vec::new();
         let removed = remove_node(&self.id)?;
         if removed {
-            globals::UDP_TO_TCP_MAP.get_mut().remove(&TryInto::<String>::try_into(source)?);
-            generated_operations.push(
-                SendableOperation::for_successors(Box::new(LeaveOperation{
-                    id: self.id.clone()
-                }))
-            );
+            globals::UDP_TO_TCP_MAP.get_mut().remove(&self.id);
+            generated_operations.push(SendableOperation::for_successors(Box::new(self.clone())));
             recalculate_neighbors()?;
+            log(format!("Starting handling failed node {}", &self.id));
+            generated_operations.append(&mut filesystem::handle_failed_node(&self.id)?);
+            log(format!("Finished handling failed node {}", &self.id));
         }
         Ok(generated_operations)
     }
@@ -378,13 +390,14 @@ impl OperationWriteExecute for NewMemberOperation {
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
 
-impl OperationWriteExecute for MembershipListOperation {
+impl OperationWriteExecute for MemberInitializationOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
         Ok(create_buf(&self, str_to_vec("MLIS")))
     }
     fn execute(&self, _source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         merge_membership_list(&self.membership_list)?;
         merge_tcp_map(&self.udp_to_tcp_map)?;
+        merge_all_file_owners(&self.all_file_owners)?;
         recalculate_neighbors()?;
         Ok(vec![])
     }

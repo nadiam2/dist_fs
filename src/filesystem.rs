@@ -10,7 +10,7 @@ use crate::globals;
 use crate::heartbeat;
 use crate::operation::*;
 use serde::{Serialize, Deserialize};
-use std::collections::{HashSet};
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::future::Future;
@@ -43,9 +43,9 @@ pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
     let dest_ids = gen_file_owners(&distributed_filename)?;
     // Gossip who has the file now
     sender.send(
-        SendableOperation::for_successors(Box::new(NewFileOperation {
+        SendableOperation::for_successors(Box::new(NewFileOwnersOperation {
             distributed_filename: distributed_filename.to_string(),
-            owners: dest_ids
+            new_owners: dest_ids
                 .iter()
                 .map(|x| x.to_string())
                 .collect::<HashSet<_>>()
@@ -120,11 +120,16 @@ async fn get_distributed_file(distributed_filename: String, local_path: String) 
         .await?;
 
     // TODO: Redo whatever tf going on here
-    let (result, source) = streams[0]
-        .try_read_operation()
-        .await?;
-    result.execute(source)?;
-    Ok(())
+    match streams.len() {
+        0 => Err(format!("No owners found for file {}", distributed_filename).into()),
+        _ => {
+            let (result, source) = streams[0]
+                .try_read_operation()
+                .await?;
+            result.execute(source)?;
+            Ok(())       
+        }
+    }
 }
 
 async fn read_file_to_buf(local_path: &String) -> BoxedErrorResult<Vec<u8>> {
@@ -171,8 +176,69 @@ fn gen_file_owners(filename: &str) -> BoxedErrorResult<Vec<String>> {
     heartbeat::gen_neighbor_list_from(file_idx as i32, 1, constants::NUM_OWNERS, true)
 }
 
+// TODO: This function makes the entire system assume there are always at least two nodes in the system
+//       and the file must have an owner or else the operation will not work correctly. This is fine for now
+//       but it is worth improving sooner rather than later (make distinct Error types to differentiate, etc).
+fn gen_new_file_owner(filename: &str) -> BoxedErrorResult<String> {
+    match globals::ALL_FILE_OWNERS.read().get(filename) {
+        Some(owners) => {
+            let potential_owners = gen_file_owners(filename)?;
+            for potential_owner in &potential_owners {
+                if !owners.contains(potential_owner) {
+                    return Ok(potential_owner.clone());
+                }
+            }
+            Err(format!("No new owners available for file {}", filename).into())
+        },
+        None => Err(format!("No owner found for file {}", filename).into())
+    }
+}
+
 fn distributed_file_path(filename: &String) -> String {
     format!("{}/{}", constants::DATA_DIR, filename)
+}
+
+// Returns messages to be gossiped
+pub fn handle_failed_node(failed_id: &String) -> BoxedErrorResult<Vec<SendableOperation>> {
+    match heartbeat::is_master() {
+        true => {
+            let mut generated_operations: Vec<SendableOperation> = Vec::new();
+            let myself_source = Source::myself();
+            // Find files they owned
+            let mut lost_files: HashSet<String> = HashSet::new();
+            for (distributed_filename, owners) in globals::ALL_FILE_OWNERS.read().iter() {
+                if owners.contains(failed_id) {
+                    lost_files.insert(distributed_filename.clone());
+                }
+            }
+            log("Found lost files".to_string());
+            // Send that they no longer own those files
+            // Separate operation so that this acts like a confirmation to fully forget about the node from
+            // the master. Can be used with a delay later if you want more error resistance.
+            let lost_file_operation = LostFilesOperation {
+                failed_owner: failed_id.clone(),
+                lost_files: lost_files.clone()
+            };
+            generated_operations.append(&mut lost_file_operation.execute(myself_source.clone())?);
+            log("Executed lost files operation locally".to_string());
+            // Gen new owners of the file and propagate
+            let mut new_owners: HashMap<String, HashSet<String>> = HashMap::new();
+            for lost_file in &lost_files {
+                let new_owner = gen_new_file_owner(&lost_file)?;
+                // TODO: Maybe optimize this into one fat packet - probably a new operation?
+                let new_owner_operation = NewFileOwnersOperation {
+                    distributed_filename: lost_file.clone(),
+                    new_owners: vec![new_owner].iter().map(|x| x.to_string()).collect()
+                };
+                generated_operations.append(&mut new_owner_operation.execute(myself_source.clone())?);
+            }
+            log("Executed all new_owner operations locally".to_string());
+            Ok(generated_operations)
+        },
+        false => {
+            Ok(vec![])
+        }
+    }
 }
 
 // Operations
@@ -183,9 +249,9 @@ pub struct GetOperation {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct NewFileOperation {
+pub struct NewFileOwnersOperation {
     pub distributed_filename: String,
-    pub owners: HashSet<String>
+    pub new_owners: HashSet<String>
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -194,6 +260,13 @@ pub struct SendFileOperation {
     pub data: Vec<u8>,
     pub is_distributed: bool
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LostFilesOperation {
+    pub failed_owner: String,
+    pub lost_files: HashSet<String>
+}
+
 
 // Trait Impls
 impl OperationWriteExecute for GetOperation {
@@ -216,20 +289,20 @@ impl OperationWriteExecute for GetOperation {
     fn to_string(&self) -> String { format!("{:?}", self) }
 }
 
-impl OperationWriteExecute for NewFileOperation {
+impl OperationWriteExecute for NewFileOwnersOperation {
     fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
-        Ok(create_buf(&self, str_to_vec("NFIL")))
+        Ok(create_buf(&self, str_to_vec("NFO ")))
     }
     fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
         // TODO: Add this file to your map with the new people that have it
         let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
         let mut file_owners = all_file_owners.entry(self.distributed_filename.clone()).or_insert(HashSet::new());
-        match (&self.owners - file_owners).len() {
+        match (&self.new_owners - file_owners).len() {
             0 => {
                 Ok(vec![])
             },
             _ => {
-                *file_owners = &self.owners | file_owners;
+                *file_owners = &self.new_owners | file_owners;
                 Ok(vec![SendableOperation::for_successors(Box::new(self.clone()))])
             }
         }
@@ -273,3 +346,23 @@ impl fmt::Debug for SendFileOperation {
     }
 }
 
+impl OperationWriteExecute for LostFilesOperation {
+    fn to_bytes(&self) -> BoxedErrorResult<Vec<u8>> {
+        Ok(create_buf(&self, str_to_vec("LOST")))
+    }
+    fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
+        let mut did_remove = false;
+        let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
+        for lost_file in &self.lost_files {
+            if let Some(owners) = all_file_owners.get_mut(lost_file) {
+                did_remove |= owners.remove(&self.failed_owner);
+            }
+        }
+        if did_remove {
+            Ok(vec![SendableOperation::for_successors(Box::new(self.clone()))])
+        } else {
+            Ok(vec![])
+        }
+    }
+    fn to_string(&self) -> String { format!("{:?}", self) }
+}

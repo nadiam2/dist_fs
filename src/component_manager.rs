@@ -178,6 +178,7 @@ pub fn console(sender: &OperationSender) -> ComponentResult {
         "get"   => filesystem::get(args)?,
         "put"   => filesystem::put(args, sender)?,
         "ls"    => filesystem::ls(args)?,
+        "is_master" => println!("{}", heartbeat::is_master()),
         _       => println!("Invalid command. (Maybe replace with a help func)")
     }
     Ok(())
