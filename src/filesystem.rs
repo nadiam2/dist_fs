@@ -25,7 +25,7 @@ pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
     let distributed_filename = args[0].to_string();
     let local_path = args[1].to_string();
     
-    async_std::task::block_on(get_distributed_file(distributed_filename, local_path))?;
+    async_std::task::block_on(get_distributed_file_as_local(&distributed_filename, &local_path))?;
     Ok(())   
 }
 
@@ -48,7 +48,8 @@ pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
             new_owners: dest_ids
                 .iter()
                 .map(|x| x.to_string())
-                .collect::<HashSet<_>>()
+                .collect::<HashSet<_>>(),
+            from_failure: false
         }))
     )?;
     // Send them the file
@@ -108,11 +109,15 @@ fn print_file_owners(maybe_distributed_filename: Option<&str>, full: bool) -> Bo
     }
 }
 
-async fn get_distributed_file(distributed_filename: String, local_path: String) -> BoxedErrorResult<()> {
+async fn get_distributed_file(distributed_filename: &String) -> BoxedErrorResult<()> {
+    get_distributed_file_as_local(distributed_filename, &distributed_file_path(distributed_filename)).await
+}
+
+async fn get_distributed_file_as_local(distributed_filename: &String, local_path: &String) -> BoxedErrorResult<()> {
     // TODO: Find owners
     let operation = SendableOperation::for_owners(&distributed_filename, Box::new(GetOperation {
         distributed_filename: distributed_filename.clone(),
-        local_path: local_path
+        local_path: local_path.clone()
     }));
 
     let mut streams = operation
@@ -199,6 +204,7 @@ fn distributed_file_path(filename: &String) -> String {
 }
 
 // Returns messages to be gossiped
+// TODO: This function does NOT scale as # of files gets very large
 pub fn handle_failed_node(failed_id: &String) -> BoxedErrorResult<Vec<SendableOperation>> {
     match heartbeat::is_master() {
         true => {
@@ -228,7 +234,8 @@ pub fn handle_failed_node(failed_id: &String) -> BoxedErrorResult<Vec<SendableOp
                 // TODO: Maybe optimize this into one fat packet - probably a new operation?
                 let new_owner_operation = NewFileOwnersOperation {
                     distributed_filename: lost_file.clone(),
-                    new_owners: vec![new_owner].iter().map(|x| x.to_string()).collect()
+                    new_owners: vec![new_owner].iter().map(|x| x.to_string()).collect(),
+                    from_failure: true
                 };
                 generated_operations.append(&mut new_owner_operation.execute(myself_source.clone())?);
             }
@@ -251,7 +258,8 @@ pub struct GetOperation {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NewFileOwnersOperation {
     pub distributed_filename: String,
-    pub new_owners: HashSet<String>
+    pub new_owners: HashSet<String>,
+    pub from_failure: bool
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -294,16 +302,24 @@ impl OperationWriteExecute for NewFileOwnersOperation {
         Ok(create_buf(&self, str_to_vec("NFO ")))
     }
     fn execute(&self, source: Source) -> BoxedErrorResult<Vec<SendableOperation>> {
-        // TODO: Add this file to your map with the new people that have it
         let mut all_file_owners = globals::ALL_FILE_OWNERS.get_mut();
         let mut file_owners = all_file_owners.entry(self.distributed_filename.clone()).or_insert(HashSet::new());
-        match (&self.new_owners - file_owners).len() {
+        let added_owners = &self.new_owners - file_owners;
+        match added_owners.len() {
             0 => {
                 Ok(vec![])
             },
             _ => {
+                let mut generated_operations = vec![SendableOperation::for_successors(Box::new(self.clone()))];
+                
                 *file_owners = &self.new_owners | file_owners;
-                Ok(vec![SendableOperation::for_successors(Box::new(self.clone()))])
+                // Need to drop all_file_owners since get_distributed_file needs to read the owners of the files
+                drop(all_file_owners);
+
+                if self.from_failure && added_owners.contains(&*globals::MY_ID.read()) {
+                    async_std::task::block_on(get_distributed_file(&self.distributed_filename))?;
+                }
+                Ok(generated_operations)
             }
         }
     }

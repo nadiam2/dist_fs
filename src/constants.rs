@@ -1,15 +1,15 @@
 use crate::heartbeat::Timestamp;
 
 // House
-pub const IP_LIST: [&str; 4] = [
-    "192.168.86.70:9000",
-    "192.168.86.70:9001",
-    "192.168.86.70:9002",
-    "192.168.86.68:9000",
-    // when youre not lazy, get a setup of the machines working
-];
+// pub const IP_LIST: [&str; 4] = [
+//     "192.168.86.70:9000",
+//     "192.168.86.70:9001",
+//     "192.168.86.70:9002",
+//     "192.168.86.68:9000",
+//     // when youre not lazy, get a setup of the machines working
+// ];
 
-// Apartment
+// My Apartment
 // pub const IP_LIST: [&str; 4] = [
 //     "192.168.0.124:9000",
 //     "192.168.0.124:9001",
@@ -17,6 +17,15 @@ pub const IP_LIST: [&str; 4] = [
 //     "192.168.0.174:9000",
 //     // when youre not lazy, get a setup of the machines working
 // ];
+
+// Nad Apartment
+pub const IP_LIST: [&str; 4] = [
+    "192.168.10.12:9000",
+    "192.168.10.12:9001",
+    "192.168.10.12:9002",
+    "192.168.10.49:9000",
+];
+
 
 pub static OP_TYPE_SIZE: usize = 4;
 pub static HEADER_SIZE: usize = 8;

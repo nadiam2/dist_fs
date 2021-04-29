@@ -174,7 +174,7 @@ pub fn console(sender: &OperationSender) -> ComponentResult {
     match cmd.trim() {
         "join"  => heartbeat::join(args, sender)?,
         "leave" => heartbeat::leave(args, sender)?,
-        "print" => heartbeat::print(args, )?,
+        "print" => heartbeat::print(args)?,
         "get"   => filesystem::get(args)?,
         "put"   => filesystem::put(args, sender)?,
         "ls"    => filesystem::ls(args)?,

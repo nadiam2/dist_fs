@@ -1,6 +1,13 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+// This file provides easy global access to RwLocks and Mutex guarded variables
+// The general strategy is that
+// new: initializes the inner option to be none
+// write: lets you write Some(val) directly into the option
+// read: lets you get an immutable reference which can be derefed for accessing the value
+// get_mut: lets you get a mutable reference which can be derefed for accessing/modifying the value
+
 // Lock Shenanigans
 pub struct RwLockOption<T> {
     lock: RwLock<Option<T>>

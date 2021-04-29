@@ -367,7 +367,7 @@ impl OperationWriteExecute for LeaveOperation {
             globals::UDP_TO_TCP_MAP.get_mut().remove(&self.id);
             generated_operations.push(SendableOperation::for_successors(Box::new(self.clone())));
             recalculate_neighbors()?;
-            log(format!("Starting handling failed node {}", &self.id));
+            log(format!("Started handling failed node {}", &self.id));
             generated_operations.append(&mut filesystem::handle_failed_node(&self.id)?);
             log(format!("Finished handling failed node {}", &self.id));
         }
