@@ -2,6 +2,14 @@
 
 This is a WIP project to implement a safe and resilient distributed filesystem as well as various applications on top of it. Before continuing, it is worth noting that this project is mostly a learning experience for me to advance my Rust skills, implement a modified form of the actor model, and build a robust distributed system. With that, it likely will never reach a state where it could be used in a production environment. Regardless, at the time of writing this file, practically all filesystem operations are complete, but very little beyond it exists.
 
+## Usage
+
+To run the system, there are two main steps.
+
+- First, go into `src/constants.rs` and make sure that `IP_LIST` contains at least one IP:Port pair that you will be using. These are the introducers to the network that every new member will contact asking for other members.
+
+- Second, run the binary by running `cargo run $PORT`.
+
 ## Repo Layout
 
 There are two different places where code can be found: `scripts/` and `src/`. 
