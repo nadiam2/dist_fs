@@ -29,8 +29,6 @@ pub fn get(args: Vec<&str>) -> BoxedErrorResult<()> {
     Ok(())   
 }
 
-// args[0] = path to local file
-// args[1] = distributed filename
 pub fn put(args: Vec<&str>, sender: &OperationSender) -> BoxedErrorResult<()> {
     check_joined()?;
     if args.len() != 2 {
